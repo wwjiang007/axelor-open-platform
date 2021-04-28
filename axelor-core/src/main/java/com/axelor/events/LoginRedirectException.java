@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -17,12 +17,18 @@
  */
 package com.axelor.events;
 
+@Deprecated
 public class LoginRedirectException extends RuntimeException {
 
   private static final long serialVersionUID = 4965839924701991583L;
 
   private final String location;
 
+  /**
+   * @deprecated use {@link
+   *     org.apache.shiro.web.util.WebUtils#issueRedirect(javax.servlet.ServletRequest,
+   *     javax.servlet.ServletResponse, String)} instead.
+   */
   public LoginRedirectException(String location) {
     super(String.format("Redirect: %s", location));
     this.location = location;

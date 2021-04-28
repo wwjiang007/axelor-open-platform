@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -88,26 +88,27 @@ function dotToNested(record, field) {
     return;
   }
 
-  var name = field.name;
-  var value = record[name];
-  var names = name.split('.');
-  var first = names.shift();
-  var last = names.pop();
-  var obj = record[first] || (record[first] = {});
-  while (names.length) {
-    var next = names.shift();
-    obj = obj[next] || (obj[next] = {});
+  ui.setNested(record, field.name, record[field.name]);
+
+  var trValue = record['$t:' + field.name];
+  if (trValue !== undefined) {
+    ui.setNested(record, ui.getNestedTrKey(field.name), trValue);
   }
-  obj[last] = value;
+
   return record;
 }
 
-function nestedToDot(record, name) {
+function nestedToDot(record, name, deleteEmpty) {
   var names = name.split('.');
   var val = record || {};
   var idx = 0;
   while (val && idx < names.length) {
-    val = val[names[idx++]];
+    var itName = names[idx++];
+    var itVal = val[itName];
+    if (deleteEmpty && _.isObject(itVal) && itVal.id === undefined) {
+      delete val[itName];
+    }
+    val = itVal;
   }
   if (idx === names.length && val !== undefined) {
     record[name] = val;
@@ -134,11 +135,12 @@ var Formatters = {
   },
 
   "duration": function(field, value) {
-    return ui.formatDuration(field, value);
+    var attrs = _.extend({}, field, field.widgetAttrs);
+    return ui.formatDuration(attrs, value);
   },
 
   "date": function(field, value) {
-    return value ? moment(value).format('DD/MM/YYYY') : "";
+    return ui.formatters.date(field, value);
   },
 
   "time": function(field, value) {
@@ -146,20 +148,32 @@ var Formatters = {
   },
 
   "datetime": function(field, value) {
-    return value ? moment(value).format('DD/MM/YYYY HH:mm') : "";
+    return ui.formatters.datetime(field, value);
   },
 
-  "one-to-one": function(field, value) {
-    var text = (value||{})[field.targetName];
-    return text ? _.escapeHTML(text) : "";
+  "one-to-one": function(field, value, record) {
+    return Formatters['many-to-one'](field, value, record);
   },
 
-  "many-to-one": function(field, value) {
+  "many-to-one": function(field, value, record) {
     var key = field.targetName;
+    var keyDot = field.name + '.' + key;
+
+    // consider dotted value in case custom target-name is given
+    if (value && record && !(key in value) && keyDot in record) {
+      key = keyDot;
+      value = record;
+    }
+
     var trKey = '$t:' + key;
-    if (value && trKey in value) key = trKey;
+
+    if (value && trKey in value) {
+      key = trKey;
+    }
+
     var text = (value||{})[key];
-    return text ? _.escapeHTML(text) : "";
+
+    return text ? _.escapeHTML(axelor.sanitize(text)) : "";
   },
 
   "one-to-many": function(field, value) {
@@ -177,6 +191,10 @@ var Formatters = {
     var css = isIcon ? "slick-icon-button fa " + icon : "slick-img-button";
     var help = field.help || field.title;
     var handler = grid.scope.handler;
+
+    if (field.css) {
+      css += ' ' + field.css;
+    }
 
     var rec = context;
     if (field.jsonField && rec) {
@@ -230,18 +248,37 @@ var Formatters = {
       }
       return res;
     };
+    var formatTag = function (v) {
+      var css = "label label-primary";
+      if (v.color) {
+        css = css + " " + v.color;
+      }
+      return '<span class="'+ css +'"><span class="tag-text">'+v.title+'</span></span>';
+    };
+
+    if (value && field.widget === 'single-select') {
+      var item = formatTag(findSelect(value));
+      return '<span class="tag-select">' + item + '</span>';
+    }
 
     if (value && field.widget === 'multi-select') {
-      var items = value.split(/\s*,\s*/).map(findSelect).map(function (res) {
-        return '<span class="label label-primary"><span class="tag-text">'+res.title+'</span></span>';
-      });
+      var items = value.split(/\s*,\s*/).map(findSelect).map(formatTag);
       return '<span class="tag-select">' + items.join(' ') + '</span>';
     }
 
     var res = findSelect(value);
     var text = res.title;
     if (field.widget === 'image-select' && res.icon) {
-      var image = "<img style='max-height: 24px;' src='" + (res.icon || res.value) + "'>";
+      var image = res.icon || res.value;
+      if (image && image.indexOf('fa-') === 0) {
+        image = "<i class='fa " + image + "'></i>";
+      } else {
+        if (field.labels === false) {
+          image = "<img style='max-height: 18px;' src='" + image + "'>";
+        } else {
+          image = "<img style='max-width: 18px;' src='" + image + "'>";
+        }
+      }
       return field.labels === false ? image : image + " " + text;
     }
     return text;
@@ -287,10 +324,24 @@ var Formatters = {
     });
 
     return items.join(' &bull; ');
+  },
+
+  "phone": function (field, value) {
+    return value ? '<a href="tel:' + value + '">' + value + '</a>' : '';
   }
 };
 
 Formatters.text = Formatters.string;
+
+var GroupFormatters = {
+  "one-to-one": function(field, value, record) {
+    return GroupFormatters['many-to-one'](field, value, record);
+  },
+
+  "many-to-one": function(field, value, record) {
+    return Formatters['many-to-one'](field, value, record) + '<span class="hidden">' + (value || {}).id + '</span>';
+  }
+};
 
 function totalsFormatter(totals, columnDef) {
 
@@ -302,7 +353,14 @@ function totalsFormatter(totals, columnDef) {
   var vals = totals[field.aggregate || 'sum'] || {};
   var val = vals[field.name];
 
-  var formatter = Formatters[field.type];
+  var type = field.type;
+  var widget = field.widget;
+
+  if (["duration"].indexOf(widget) >= 0) {
+    type = widget;
+  }
+
+  var formatter = Formatters[type];
   if (formatter) {
     return formatter(field, val);
   }
@@ -352,14 +410,14 @@ _.extend(Factory.prototype, {
     }
 
     if (typeof value === 'string') {
-      value = axelor.sanitize(value).replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&');
+      value = axelor.sanitize(value).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
     }
 
     if (type === "button" || type === "progress") {
       return Formatters[type](field, value, dataContext, this.grid);
     }
 
-    if (["url", "duration"].indexOf(widget) > 0) {
+    if (["url", "duration", "phone"].indexOf(widget) >= 0) {
       type = widget.toLowerCase();
     }
 
@@ -367,13 +425,22 @@ _.extend(Factory.prototype, {
       var url = null;
       if (field.target === "com.axelor.meta.db.MetaFile") {
         if (value) {
-          url = ui.makeImageURL("com.axelor.meta.db.MetaFile", "content", (value.id || value), undefined, this.grid.handler);
+          url = ui.makeImageURL("com.axelor.meta.db.MetaFile", "content", (value.id || value), undefined, this.grid.handler, dataContext.id);
         }
         if (url && widget === "binary-link") {
           return '<a href="' + url + '" download="' + value.fileName + '">' + value.fileName + '</a>';
         }
       } else {
-        url = ui.makeImageURL(this.grid.handler._model, field.name, dataContext, undefined, this.grid.handler) + "&image=true";
+        var parentScope;
+        var parentId;
+        if (this.grid.handler.$parent && this.grid.handler.$parent.record && this.grid.handler.$parent.record.id) {
+            parentScope = this.grid.handler.$parent;
+            parentId = this.grid.handler.$parent.record.id;
+        } else {
+          parentScope = this.grid.handler;
+          parentId = dataContext.id;
+        }
+        url = ui.makeImageURL(this.grid.handler._model, field.name, dataContext, undefined, parentScope, parentId) + "&image=true";
       }
       return url ? '<img src="' + url + '" style="height: 21px;margin-top: -2px;">' : '';
     }
@@ -437,8 +504,8 @@ var Grid = function(scope, element, attrs, ViewService, ActionService) {
     noFilter = noFilter === 'true';
   }
 
-  this.compile = function(template) {
-    return ViewService.compile(template)(scope.$new());
+  this.compile = function(template, newScope) {
+    return ViewService.compile(template)(newScope || scope.$new());
   };
 
   this.newActionHandler = function(scope, element, options) {
@@ -458,6 +525,7 @@ function buttonScope(scope) {
   var handler = scope.handler;
 
   btnScope._dataSource = handler._dataSource;
+  btnScope._viewParams = handler._viewParams;
   btnScope.editRecord = function (record) {};
   btnScope.reload = function () {
     if ((handler.field||{}).target) {
@@ -496,7 +564,10 @@ Grid.prototype.parse = function(view) {
 
     type = (item.widgetAttrs||{}).type || field.type || item.serverType || item.type || 'string';
 
+    var dummy = angular.equals(field, {});
+
     field = _.extend({}, field, item, {type: type});
+    if (dummy) { field.dummy = true; }
     scope.fields_view[item.name] = field;
     path = path ? path + '.' + item.name : item.name;
 
@@ -522,7 +593,7 @@ Grid.prototype.parse = function(view) {
       break;
     }
 
-    if (field.transient || field.json || field.encrypted) {
+    if (field.transient || field.dummy || field.json || field.encrypted) {
       sortable = false;
     }
 
@@ -535,6 +606,9 @@ Grid.prototype.parse = function(view) {
     }
 
     if (field.type == "button" || field.type == "icon") {
+      if (!item.autoTitle) {
+        item.autoTitle = item.title;
+      }
       item.title = "&nbsp;";
       item.width = field.width || 32;
     }
@@ -568,6 +642,10 @@ Grid.prototype.parse = function(view) {
         css.push('slick-cell-required');
       }
     }
+    if (item.tooltip) {
+      css.push('has-tooltip');
+    }
+
     column.cssClass = css.join(' ');
 
     cols.push(column);
@@ -576,7 +654,7 @@ Grid.prototype.parse = function(view) {
       column.groupTotalsFormatter = totalsFormatter;
     }
 
-    if (field.type === "button" || field.type === "boolean" || field.type === "icon") {
+    if (field.type === "button" || field.type === "icon") {
       return;
     }
 
@@ -590,18 +668,27 @@ Grid.prototype.parse = function(view) {
       command: "sort-desc"
     } : null, sortable ? {
       separator: true
-    } : null, view.editable ? null : {
+    } : null, {
       title: _t("Group by") + " <i>" + column.name + "</i>",
       command: "group-by"
-    }, view.editable ? null : {
+    }, {
       title: _t("Ungroup"),
       command: "ungroup"
-    }, view.editable ? null : {
+    }, {
       separator: true
     }, {
       title: _t("Hide") + " <i>" + column.name + "</i>",
       command: "hide"
     }];
+
+    if (view.name) {
+      Array.prototype.push.apply(menus, [{
+        separator: true
+      }, {
+        title: _t("Customize…"),
+        command: "customize"
+      }]);
+    }
 
     menus = _.compact(menus);
 
@@ -669,7 +756,7 @@ Grid.prototype.parse = function(view) {
   }
 
   // add column for re-ordering rows
-  this._canMove = view.canMove && view.orderBy === "sequence" && !view.groupBy;
+  this._canMove = view.canMove && !view.groupBy;
   if (this._canMove) {
     cols.push({
       id: "_move_column",
@@ -820,11 +907,11 @@ Grid.prototype._doInit = function(view) {
       dataView.getItem(old[0]).selected = true;
     }
     if (!focus) {
-      _.each(dataView.getItems(), function (item, i) {
-        if (item.selected) {
-          selection.push(i);
-        }
-      });
+      var selectionIds = _.chain(dataView.getItems())
+        .filter(function(item) { return item.selected; })
+        .map(function(item) { return item.id; })
+        .value();
+      _.each(dataView.mapIdsToRows(selectionIds), function(row) { selection.push(row); });
     }
     selection = _.unique(selection);
     grid.setSelectedRows(selection);
@@ -844,6 +931,9 @@ Grid.prototype._doInit = function(view) {
       grid.setActiveCell(_.first(selection), 1);
       grid.focus();
     }
+  };
+  dataView.$cancelEdit = function () {
+    that.cancelEdit();
   };
 
   if (this._canMove) {
@@ -921,7 +1011,12 @@ Grid.prototype._doInit = function(view) {
 
     function _setInputs(cols) {
       _.each(cols, function(col){
-        if (!col.xpath || col.descriptor.type === 'button' || col.descriptor.json || col.descriptor.encrypted) return;
+        if (!col.xpath || col.descriptor.type === 'button'
+            || col.descriptor.transient || col.descriptor.dummy
+            || col.descriptor.json || col.descriptor.encrypted
+            || col.descriptor.target && !col.descriptor.targetName) {
+          return;
+        }
         var header = grid.getHeaderRowColumn(col.id),
           input = $('<input type="text">').data("columnId", col.id).val(filters[col.id]).appendTo(header),
           field = col.descriptor || {};
@@ -1006,7 +1101,7 @@ Grid.prototype._doInit = function(view) {
     that.resetColumns();
   });
 
-  scope.$on("on:before-save", function(e, record) {
+  function onBeforeSave(e, record, noWait) {
 
     // only for editable grid
     if (!that.editable || !that.isEditActive()) {
@@ -1015,7 +1110,7 @@ Grid.prototype._doInit = function(view) {
 
     var row = null;
     if (that.isEditActive() && that.editorScope.record !== record) {
-      that.commitEdit();
+      that.commitEdit(noWait);
       row = grid.getDataItem(grid.getDataLength() - 1); // to check if adding new row
     }
     if (grid.getActiveCell() && that.focusInvalidCell(grid.getActiveCell())) {
@@ -1082,8 +1177,15 @@ Grid.prototype._doInit = function(view) {
 
     e.preventDefault();
     return false;
+  }
+
+  scope.$on("on:before-save", function (e, record) {
+    onBeforeSave(e, record);
   });
 
+  scope.$on("on:before-save-action", function (e, record) {
+    onBeforeSave(e, record, true);
+  });
 
   scope.$timeout(function () {
     that.zIndexFix();
@@ -1116,9 +1218,18 @@ Grid.prototype._doInit = function(view) {
   scope.$on('dom:attach', resetScroll);
   scope.$on('tab:select', resetScroll);
 
+  function setWidthChanged() {
+    _.each(grid.getColumns(), function (column) {
+      if (column.previousWidth != column.width) {
+        column.$widthChanged = true;
+      }
+    });
+  }
+
   var onColumnsResized = false;
   this.subscribe(grid.onColumnsResized, function (e, args) {
     onColumnsResized = true;
+    setWidthChanged();
   });
 
   scope.$on('grid:adjust-columns', function () {
@@ -1147,6 +1258,9 @@ Grid.prototype.zIndexFix = function() {
   var zIndex = this.element.parents('.ui-dialog:first').zIndex();
   if (zIndex) {
     this.element.find('.slick-headerrow-column').zIndex(zIndex);
+    if (this.editorForm && this.editorForm.is(':visible')) {
+      this.editorForm.find('.boolean-item input').zIndex(zIndex);
+    }
   }
 };
 
@@ -1350,8 +1464,9 @@ Grid.prototype.onBeforeMenuShow = function(event, args) {
   });
 
   _.each(this.cols, function(col) {
-    if (_.contains(this.visibleCols, col.id)) return;
-    menu.items.push({
+    if (_.contains(this.visibleCols, col.id) || (col.descriptor && col.descriptor.hidden)) return;
+    // before customize command
+    menu.items.splice(menu.items.length - 2, 0, {
       title: _t('Show') + " <i>" + col.name + "</i>",
       command: 'show',
       field: col.field
@@ -1404,6 +1519,34 @@ Grid.prototype.onMenuCommand = function(event, args) {
   if (args.command === 'show') {
     return this.showColumn(args.item.field, true);
   }
+
+  if (args.command === 'customize') {
+    this.showCustomizePopup();
+  }
+};
+
+Grid.prototype.showCustomizePopup = function () {
+  var that = this;
+  var formScope = null;
+  var popup = this._customizePopup || (function () {
+    formScope = that.scope.$new(true);
+    formScope.target = that.handler._model;
+    formScope.view = that.scope.view;
+    formScope.grid = that.grid;
+
+    var form = that.compile("<div ui-slick-columns-form target='target' view='view'></div>", formScope);
+
+    that.scope.$on('$destroy', function () {
+      form.dialog("destroy");
+      form = null;
+      popup = null;
+      that._customizePopup = null;
+    });
+
+    return that._customizePopup = form;
+  })();
+
+  popup.dialog("open");
 };
 
 Grid.prototype.onKeyDown = function (e) {
@@ -1429,6 +1572,10 @@ Grid.prototype.onKeyDown = function (e) {
 };
 
 Grid.prototype.isCellEditable = function(row, cell) {
+  var dataItem = this.grid.getDataItem(row);
+  if (dataItem && (dataItem.__group || dataItem.__groupTotals)) {
+    return false;
+  }
   var cols = this.grid.getColumns(),
     col = cols[cell];
   if (!col || col.id === "_edit_column" || col.id === "_move_column" || col.id === "_checkbox_selector") {
@@ -1501,10 +1648,11 @@ Grid.prototype.findPrevEditable = function(posY, posX) {
   return null;
 };
 
-Grid.prototype.saveChanges = function(args, callback) {
+Grid.prototype.saveChanges = function(args, callback, errback, noWait) {
 
   // onBeforeSave may cause recursion
-  if (this._saveChangesRunning) {
+  // also prevent saving changes while still committing
+  if (this._saveChangesRunning || this._committing) {
     return;
   }
 
@@ -1513,10 +1661,16 @@ Grid.prototype.saveChanges = function(args, callback) {
   var params = arguments;
 
   this._saveChangesRunning = true;
-  this.scope.waitForActions(function () {
+  var task = function () {
     that.__saveChanges.apply(that, params);
     that._saveChangesRunning = false;
-  }, 100);
+  };
+
+  if (noWait) {
+    task();
+  } else {
+    this.scope.waitForActions(task, 100);
+  }
 
   return true;
 };
@@ -1794,13 +1948,12 @@ Grid.prototype.setEditors = function(form, formScope, forEdit) {
     var cell = grid.getActiveCell();
     var item = cell ? grid.getDataItem(cell.row) : {};
     var record = formScope.record || {};
-    var result = _.extend({}, item);
+    var result = _.extend({}, item, record, { id: item.id });
 
-    // get updated values
-    _.filter(grid.getColumns(), function (col) {
-      return col.descriptor && col.field && col.field.indexOf('.') === -1;
-    }).forEach(function (col) {
-      result[col.field] = record[col.field];
+    _.each(result, function(value, name) {
+      if (_.isObject(value) && !_.isArray(value) && value.id === undefined && !_.startsWith(name, '$')) {
+        delete result[name];
+      }
     });
 
     return result;
@@ -1864,7 +2017,7 @@ Grid.prototype.adjustEditor = function () {
       left = false;
       setTimeout(function () {
         if (activeCell.cell === n) {
-          widget.find('input,:focusable').first().focus().select();
+          widget.find('input,:focusable:not(".secondary-focus")').first().focus().select();
         }
       }, 100)
     } else if (left) {
@@ -1873,6 +2026,7 @@ Grid.prototype.adjustEditor = function () {
   });
 
   form.css('padding-left', leftPadding);
+  this.zIndexFix();
 }
 
 Grid.prototype.showEditor = function (activeCell) {
@@ -1934,9 +2088,9 @@ Grid.prototype.showEditor = function (activeCell) {
       }
       if (e.keyCode !== 9) return;
       if (e.shiftKey) {
-      form.find('.form-item-container :input').last().focus().select();
+        cancel.focus();
       } else {
-      cancel.focus();
+        form.find('.form-item-container :input').first().focus().select();
       }
       e.stopPropagation();
       e.preventDefault();
@@ -1945,9 +2099,9 @@ Grid.prototype.showEditor = function (activeCell) {
     cancel.keydown(function (e) {
       if (e.keyCode !== 9) return;
       if (e.shiftKey) {
-      confirm.focus();
+        form.find('.form-item-container :input').last().focus().select();
       } else {
-        form.find('.form-item-container :input').first().focus().select();
+        confirm.focus();
       }
       e.stopPropagation();
       e.preventDefault();
@@ -1955,7 +2109,7 @@ Grid.prototype.showEditor = function (activeCell) {
     });
     form.on('keydown', '.form-item-container :input:first', function (e) {
       if (e.keyCode === 9 && e.shiftKey) {
-        cancel.focus();
+        confirm.focus();
         e.stopPropagation();
         e.preventDefault();
         return false;
@@ -1963,7 +2117,7 @@ Grid.prototype.showEditor = function (activeCell) {
     });
     form.on('keydown', '.form-item-container :input:last', function (e) {
       if (e.keyCode === 9 && !e.shiftKey) {
-        confirm.focus();
+        cancel.focus();
         e.stopPropagation();
         e.preventDefault();
         return false;
@@ -1971,7 +2125,7 @@ Grid.prototype.showEditor = function (activeCell) {
     });
 
     $("<div class='slick-form-buttons'>")
-      .append([confirm, cancel])
+      .append([cancel, confirm])
       .appendTo($("<div class='slick-form-buttons-wrapper'>").appendTo(form));
 
     form.on('focus', '.form-item-container :input', function (e) {
@@ -2035,6 +2189,7 @@ Grid.prototype.showEditor = function (activeCell) {
   }, 100)
 
   this._editorVisible = grid._editorVisible = true;
+  this.scope.$emit('on:grid-edit-start', this);
   this.adjustEditor(args);
 
   var item = grid.getDataItem(args.row) || {};
@@ -2043,7 +2198,7 @@ Grid.prototype.showEditor = function (activeCell) {
   // convert dotted values
   this.cols
     .map(function (col) { return col.descriptor; })
-    .filter(function (field) { return field && field.name && field.name.indexOf('.') > -1; })
+    .filter(function (field) { return field && field.name && field.name.indexOf('.') > -1 && record[field.name] !== undefined; })
     .forEach(function (field) { dotToNested(record, field); });
 
   formScope.editRecord(record);
@@ -2055,6 +2210,7 @@ Grid.prototype.cancelEdit = function (focus) {
   this.editorScope.edit(null);
   this._editorOverlay.hide();
   this._editorVisible = this.grid._editorVisible = false;
+  this.scope.$emit('on:grid-edit-end', this);
   if (this.handler.dataView.getItemById(0)) {
     this.handler.dataView.deleteItem(0);
   }
@@ -2068,7 +2224,8 @@ Grid.prototype.cancelEdit = function (focus) {
   }
 };
 
-Grid.prototype.commitEdit = function () {
+Grid.prototype.commitEdit = function (noWait) {
+  this._committing = true;
 
   var that = this;
   var defer = this.handler._defer();
@@ -2076,6 +2233,12 @@ Grid.prototype.commitEdit = function () {
 
   var cleanUp = function () {
     that._commitPromise = null;
+
+    // Force fetch if pop-up form view is opened.
+    // This is needed if form view has fields no present in grid view.
+    _.forEach(data.getItems(), function(item) {
+      data.updateItem(item.id, _.extend(item || {}, { $fetched: false }));
+    });
   }
 
   this._commitPromise = promise;
@@ -2094,7 +2257,11 @@ Grid.prototype.commitEdit = function () {
     return promise;
   }
 
-  if (!scope.isDirty()) {
+  var itemRecord = (data.getItemById(scope.record.id) || {});
+  var itemVersion = itemRecord.version || itemRecord.$version;
+  var currentVersion = scope.record.version || scope.record.$version;
+
+  if (!scope.isDirty() && itemVersion === currentVersion) {
     this.cancelEdit();
     defer.resolve();
     return promise;
@@ -2103,13 +2270,18 @@ Grid.prototype.commitEdit = function () {
   scope.$emit("on:before-save", scope.record);
 
   var row = this.grid.getActiveCell().row;
-  var item = data.getItemByIdx(row);
 
-  scope.waitForActions(function() {
-    var record = _.extend(scope.getContextRecord(), { $dirty: true, _orignal: scope.$$original });
-    if (record.id === null || record.id === undefined) {
-      record.id = item.id;
+  var task = function () {
+    var record = _.extend(scope.getContextRecord(), { $fetched: false, $dirty: true });
+
+    if (!data.getItemById(record.id)) {
+      // record has changed elsewhere
+      return;
     }
+
+    // from nested fields to dotted fields and delete empty values
+    _.filter(Object.keys(scope.fields), function(field) { return field.indexOf('.') >= 0; })
+      .forEach(function(field) { nestedToDot(record, field, true); });
 
     that.cols.forEach(function (col) {
       if (col.descriptor && col.descriptor.jsonField) {
@@ -2120,7 +2292,7 @@ Grid.prototype.commitEdit = function () {
       }
     });
 
-    data.updateItem(item.id, record);
+    data.updateItem(record.id, record);
 
     var diff = scope._dataSource.diff(scope.$$original, scope.record);
     that.cols.forEach(function (col) {
@@ -2129,14 +2301,25 @@ Grid.prototype.commitEdit = function () {
       }
     });
 
+    delete that._committing;
     that.saveChanges(null, function () {
       that.cancelEdit();
       defer.resolve();
-    }, defer.reject);
-  });
+    }, defer.reject, noWait);
+  };
+
+  if (noWait) {
+    task();
+  } else {
+    scope.waitForActions(task);
+  }
 
   return promise;
 };
+
+function getSelectedFlags(items) {
+  return _.map(items, function (item) { return item.selected });
+}
 
 Grid.prototype.onSelectionChanged = function(event, args) {
   var grid = this.grid;
@@ -2148,7 +2331,22 @@ Grid.prototype.onSelectionChanged = function(event, args) {
   }
 
   if (this.handler.onSelectionChanged) {
+    var items = this.handler.getItems();
+    var selectedFlags = getSelectedFlags(items);
+    var changedRows = [];
+
     this.handler.onSelectionChanged(event, args);
+
+    _.each(getSelectedFlags(items), function (selected, row) {
+      if (Boolean(selected) !== Boolean(selectedFlags[row])) {
+        changedRows.push(row);
+      }
+    });
+
+    if (changedRows.length) {
+      grid.invalidateRows(changedRows);
+      grid.render();
+    }
   }
   this.element.find(' > .slick-viewport > .grid-canvas > .slick-row')
     .removeClass('selected')
@@ -2196,65 +2394,73 @@ Grid.prototype._resequence = function (items) {
 Grid.prototype.onMoveRows = function (event, args) {
   var grid = this.grid;
   var dataView = this.scope.dataView;
-    var rows = args.rows;
-    var items = dataView.getItems();
-    var insertBefore = args.insertBefore;
+  var rows = args.rows;
+  var items = dataView.getItems();
+  var insertBefore = args.insertBefore;
 
-    var left = items.slice(0, insertBefore);
-    var right = items.slice(insertBefore, items.length);
-    var extractedRows = [];
+  var left = items.slice(0, insertBefore);
+  var right = items.slice(insertBefore, items.length);
+  var extractedRows = [];
 
-    rows.sort(function(a, b) { return a - b; });
+  rows.sort(function(a, b) { return a - b; });
 
-    var i;
+  var i;
 
-    for (i = 0; i < rows.length; i++) {
-      extractedRows.push(items[rows[i]]);
-    }
-
-    rows.reverse();
-
-    for (i = 0; i < rows.length; i++) {
-      var row = rows[i];
-      if (row < insertBefore) {
-        left.splice(row, 1);
-      } else {
-        right.splice(row - insertBefore, 1);
-      }
-    }
-
-    items = left.concat(extractedRows.concat(right));
-
-    var selectedRows = [];
-    for (i = 0; i < rows.length; i++) {
-      selectedRows.push(left.length + i);
+  for (i = 0; i < rows.length; i++) {
+    extractedRows.push(items[rows[i]]);
   }
 
-    // resequence
-    this._resequence(items);
+  rows.reverse();
 
-    function resetSelection() {
-      grid.setActiveCell(selectedRows[0], 0);
-      grid.setSelectedRows(selectedRows);
+  for (i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row < insertBefore) {
+      left.splice(row, 1);
+    } else {
+      right.splice(row - insertBefore, 1);
     }
+  }
 
-    dataView.beginUpdate();
+  items = left.concat(extractedRows.concat(right));
+
+  var selectedRows = [];
+  for (i = 0; i < rows.length; i++) {
+    selectedRows.push(left.length + i);
+  }
+
+  // resequence
+  this._resequence(items);
+
+  function resetSelection() {
+    grid.setActiveCell(selectedRows[0], 0);
+    grid.setSelectedRows(selectedRows);
+  }
+
+  dataView.beginUpdate();
   dataView.setItems(items);
   dataView.endUpdate();
   resetSelection();
-    grid.render();
+  grid.render();
 
-    var that = this;
-    this.scope.$timeout(function () {
-      dataView.$isResequencing = true;
-      var saved = that.saveChanges(null, function() {
-        delete dataView.$isResequencing;
-        resetSelection();
-      }, true);
-      if (saved === false) {
-        delete dataView.$isResequencing;
-      }
-    });
+  if (this.scope.view.orderBy !== "sequence") {
+    var field = this.handler.field;
+    if (field && field.name && this.handler.record) {
+      this.handler.record[field.name] = items;
+    }
+    return;
+  }
+
+  var that = this;
+  this.scope.$timeout(function () {
+    dataView.$isResequencing = true;
+    var saved = that.saveChanges(null, function() {
+      delete dataView.$isResequencing;
+      resetSelection();
+    }, true);
+    if (saved === false) {
+      delete dataView.$isResequencing;
+    }
+  });
 };
 
 Grid.prototype.onButtonClick = function(event, args) {
@@ -2436,7 +2642,8 @@ Grid.prototype.groupBy = function(names) {
     return {
       getter: function(item) {
         var value = item[name];
-        var formatter = Formatters[field.selection ? 'selection' : field.type];
+        var type = field.selection ? 'selection' : field.type;
+        var formatter = GroupFormatters[type] || Formatters[type];
         if (field.jsonPath && field.jsonField) {
           var jsonValue = item[field.jsonField];
           if (jsonValue) {
@@ -2511,6 +2718,323 @@ function EditIconColumn(options) {
     "getColumnDefinition": getColumnDefinition
   });
 }
+
+ui.directive("uiSlickColumnsForm", function () {
+  return {
+    restrict: 'EA',
+    replace: true,
+    scope: {
+      target: "=",
+      view: "="
+    },
+    controller: ["$scope", "$element", 'DataSource', 'ViewService', function($scope, $element, DataSource, ViewService) {
+      var searchLimit = 200;
+      var excludedFieldNames = ["id", "version"];
+      var columnDomain = "self.metaModel.fullName = :_modelName AND self.name NOT IN :_excludedFieldNames";
+      var columnContext = {"_modelName": $scope.target, "_excludedFieldNames": excludedFieldNames};
+
+      function isAdmin() {
+        return axelor.config["user.login"] === "admin" || axelor.config["user.group"] === "admins";
+      }
+
+      function canReset() {
+        return $scope.view.customViewId && (!$scope.view.customViewShared || isAdmin());
+      }
+
+      function closeAndReload() {
+        $scope.doClose();
+        setTimeout(function () {
+          window.location.reload();
+        });
+      }
+
+      function humanizeName(name) {
+        return _.humanize(name.substring(name.lastIndexOf(".") + 1));
+      }
+
+      function findIndex(array, callback) {
+        for (var index = 0; index < (array || []).length; ++index) {
+          var element = array[index];
+          if (callback(element, index, array)) {
+            return index;
+          }
+        }
+        return -1;
+      }
+
+      function findLastIndex(array, callback) {
+        for (var index = (array || []).length - 1; index >= 0; --index) {
+          var element = array[index];
+          if (callback(element, index, array)) {
+            return index;
+          }
+        }
+        return -1;
+      }
+
+      $scope._viewParams = {
+        model: "com.axelor.meta.db.MetaField",
+        viewType: "form",
+        views: [{
+          type: "form",
+          items: [{
+            type: "panel-related",
+            title: _t("Columns"),
+            name: "items",
+            target: "com.axelor.meta.db.MetaField",
+            domain: columnDomain,
+            context: columnContext,
+            searchLimit: searchLimit,
+            serverType: "MANY_TO_MANY",
+            canNew: false,
+            canEdit: false,
+            canView: false,
+            canMove: true,
+            editIcon: false,
+            items: [{
+              type: "field",
+              name: "$title",
+              serverType: "STRING",
+              title: _t("Title")
+            }, {
+              type: "field",
+              name: "name",
+              sortable: false
+            }, {
+              type: "field",
+              name: "label",
+              hidden: true
+            }]
+          }, {
+            type: "panel",
+            items: [{
+              name: "saveWidths",
+              type: "field",
+              serverType: "BOOLEAN",
+              widget: "inline-checkbox",
+              title: _t("Save column widths")
+            },{
+              name: "share",
+              type: "field",
+              serverType: "BOOLEAN",
+              widget: "inline-checkbox",
+              title: _t("Share"),
+              hidden: !isAdmin()
+            }]
+          }]
+        }]
+      };
+
+      ui.ViewCtrl.call(this, $scope, DataSource, ViewService);
+      ui.FormViewCtrl.call(this, $scope, $element);
+
+      $scope.setEditable();
+      $scope.onHotKey = function (e) {
+        e.preventDefault();
+        return false;
+      };
+
+      var ds = $scope._dataSource;
+      var recordsMap = {};
+      var extraFields = [];
+      var filterViewName = (($scope.$parent.$parent.$parent._viewParams || {})
+        .params || {})["search-filters"];
+
+      $scope.$on('grid-change:items', function(e, records, page) {
+        _.each(records, function (record) {
+          var existing = recordsMap[record.name] || {};
+          var title = existing.$title || _t(record.label || humanizeName(record.name));
+          record.$title = title;
+        });
+        if (page.from === 0) {
+          _.each(extraFields, function (field) {
+            if (!_.findWhere(records, { name: field.name })) {
+              records.push(field);
+            }
+          });
+        }
+        if (!(e.targetScope._dataSource || {})._sortBy) {
+          records.sort(function (first, second) {
+            return (first.$title || "").localeCompare(second.$title || "");
+          });
+        }
+      });
+
+      $scope.onShow = function(viewPromise) {
+        var fakeId = 0;
+
+        if (filterViewName) {
+          ViewService.getMetaDef($scope.target, {name: filterViewName, type: 'search-filters'})
+            .success(function(fields, view) {
+              var existingNames = _.pluck($scope.view.items, 'name');
+              _.each(view.items, function (item) {
+                if (item.hidden && item.name) {
+                  if (existingNames.indexOf(item.name) < 0) {
+                    excludedFieldNames.push(item.name);
+                  }
+                  return;
+                }
+                item.$title = item.title || item.autoTitle || _t(humanizeName(item.name));
+                item.id = item.$id = --fakeId;
+                extraFields.push(item);
+              });
+            })
+        }
+
+        ds.search({
+          fields: ['name', 'label'],
+          domain: columnDomain,
+          context: columnContext,
+          limit: searchLimit
+        }).success(function (records) {
+          recordsMap = records.reduce(function (a, x) {
+            a[x.name] = x;
+            return a;
+          }, {});
+
+          var items = [];
+          var jsonFields = [];
+          _.each($scope.view.items, function (x) {
+            if (x.type === 'field' || x.type === 'button') {
+              items.push(x);
+            } else if (x.jsonField && jsonFields.indexOf(x.jsonField) < 0) {
+              jsonFields.push(x.jsonField);
+              var jsonField = recordsMap[x.jsonField];
+              if (jsonField) {
+                items.push(jsonField);
+              }
+            }
+          });
+
+          // Remove attrs at default index
+          var buttonIndex = findIndex(items, function (item) { return item && item.type === "button" });
+          var lastIndex = findLastIndex(items, function (item) { return item && !item.hidden; });
+          var defaultJsonIndex;
+          if (buttonIndex < 0 || (items[lastIndex] || {}).type !== "button") {
+            defaultJsonIndex = items.length - 1;
+          } else {
+            defaultJsonIndex = buttonIndex - 1;
+          }
+          if ((items[defaultJsonIndex] || {}).name === "attrs") {
+            items.splice(defaultJsonIndex, 1);
+          }
+
+          var values = items.map(function (x) {
+            var rec = recordsMap[x.name];
+            if (!rec || x.type !== 'field') {
+              rec = x;
+              rec.$title = x.autoTitle || x.title || _t(humanizeName(x.name));
+            } else {
+              rec.$title = x.title || _t(rec.label) || x.autoTitle || _t(humanizeName(x.name));
+            }
+            rec = _.extend({}, rec, { hidden: x.hidden });
+            if (rec.id === undefined) {
+              --fakeId;
+              rec = _.extend({}, rec, { id: fakeId, $id: fakeId });
+            }
+            if (rec.name.indexOf(".") >= 0 || rec.type && rec.type !== "field") {
+              extraFields.push(rec);
+            }
+            return rec;
+          }).filter(function (x) {
+            return !x.hidden;
+          });
+
+          var record = {
+            share: $scope.view.customViewShared && isAdmin(),
+            items: values
+          };
+
+          $scope.edit(record);
+        });
+      };
+
+      $scope.onSaveView = function () {
+        var record = $scope.record;
+
+        if (!_.find(record.items, function (item) { return !item.type || item.type === "field"; })) {
+          axelor.dialogs.error(_t("Grid requires at least one field."));
+          return;
+        }
+
+        var schema = $scope.view;
+
+        schema.customViewShared = record.share;
+
+        var items = [];
+        var existing = schema.items
+          .filter(function (x) { return x.type === 'field' || x.type === 'button'; })
+          .reduce(function (m, x) {
+            m[x.name] = x;
+            return m;
+          }, {});
+
+        // first add non-field items
+        schema.items
+          .filter(function (x) { return x.type !== 'field'; })
+          .filter(function (x) { return x.type !== 'button'; })
+          .forEach(function (item) {
+            items.push(item);
+          });
+
+        // add items
+        record.items
+          .forEach(function (x) {
+            var item = existing[x.name] || { name: x.name, type: "field" };
+            if (x.title) {
+              item.title = x.title;
+            }
+            delete item.hidden;
+            items.push(item);
+          });
+
+        // apply changed widths
+        if (record.saveWidths) {
+          $scope.$parent.grid.getColumns()
+            .filter(function (column) { return column.$widthChanged })
+            .forEach(function (column) {
+              var item = _.findWhere(items, { name: column.field });
+              if (item) {
+                item.width = column.width;
+              }
+            });
+        }
+
+        schema = _.extend({}, schema, { items: items, filterViewName: filterViewName });
+
+        ViewService.save(schema).then(closeAndReload);
+      };
+
+      $scope.onReset = function () {
+        axelor.dialogs.confirm(_t('Are you sure you want to reset this view customization?'),
+          function (confirmed) {
+            if (confirmed) {
+              var action = "com.axelor.meta.web.MetaController:removeUserCustomViews";
+              var model = "com.axelor.meta.db.MetaView";
+              var context = _.extend({}, $scope.view, { id: $scope.view.viewId });
+              ViewService.action(action, model, context).then(closeAndReload);
+            }
+        });
+      };
+
+      $scope.buttons = canReset() ? [{
+          text: _t('Reset'),
+          'class': 'btn btn-danger button-reset',
+          tabIndex: -1,
+          click: $scope.onReset
+      }] : [];
+
+      $scope.show();
+    }],
+    link: function (scope, element, attrs) {
+
+      scope.doClose = function () {
+        element.dialog("close");
+      };
+    },
+    template: "<div ui-dialog ui-view-form x-handler='true' x-on-ok='onSaveView' x-buttons='buttons'></div>"
+  };
+});
 
 ui.directive('uiSlickEditors', function() {
 
@@ -2640,12 +3164,12 @@ ui.directive('uiSlickGrid', ['ViewService', 'ActionService', function(ViewServic
         if (attrs.editable === "false") {
           schema.editable = false;
         }
-        scope.selector = attrs.selector;
+        scope.selector = attrs.selector || schema.selector;
         scope.noFilter = attrs.noFilter;
 
         if (axelor.config["view.grid.selection"] === "checkbox" && !scope.selector) {
           scope.selector = "checkbox";
-        } else {
+        } else if (scope.selector !== "checkbox") {
           scope.selectorAttr = scope.selector;
         }
 
@@ -2677,11 +3201,16 @@ ui.directive('uiSlickGrid', ['ViewService', 'ActionService', function(ViewServic
         grid = new Grid(scope, element, attrs, ViewService, ActionService);
         if (form) {
           formScope.grid = grid;
+          formScope._isEditorScope = true;
           grid.setEditors(form, formScope, forEdit);
         }
 
         if (!handler._isPopup && schema.inlineHelp && !axelor.config["user.noHelp"]) {
           addHelp(schema.inlineHelp);
+        }
+
+        if (_.some(schema.items, function (x) { return x.tooltip; })) {
+          addTooltip(grid);
         }
 
         // handle pending attrs change on dashlets
@@ -2726,6 +3255,35 @@ ui.directive('uiSlickGrid', ['ViewService', 'ActionService', function(ViewServic
         });
       }
 
+      function addTooltip(inst) {
+        var grid = inst.grid;
+
+        scope.getToolTip = function (event) {
+          var cell = grid.getCellFromEvent(event);
+          var col = grid.getColumns()[cell.cell];
+          var field = col.descriptor || {};
+          var tooltip = field.tooltip;
+
+          if (!tooltip) return;
+
+          var record = grid.getDataItem(cell.row);
+
+          return {
+            tooltip: tooltip,
+            record: record,
+            dataSource: handler._dataSource
+          };
+        };
+
+        var tooltip = ViewService.compile(
+            "<div ui-tooltip" +
+            " selector='.slick-cell.has-tooltip'" +
+            " getter='getToolTip($event)'>"
+            )(scope);
+
+        element.append(tooltip);
+      }
+
       element.addClass('slickgrid').hide();
       var unwatch = scope.$watch("view.loaded", function gridSchemaWatch(viewLoaded) {
         if (!viewLoaded || !scope.dataView) {
@@ -2741,11 +3299,16 @@ ui.directive('uiSlickGrid', ['ViewService', 'ActionService', function(ViewServic
         if (field.editable !== undefined) {
           schema.editable = field.editable;
         }
+        if (field.selector !== undefined) {
+          schema.selector = field.selector;
+        }
         schema.rowHeight = field.rowHeight || schema.rowHeight;
         schema.orderBy = field.orderBy || schema.orderBy;
         schema.groupBy = field.groupBy || schema.groupBy;
-        schema.groupBy = (schema.editable || schema.groupBy === "false") ? false : schema.groupBy;
-        schema.canMassUpdate = !!_.find(schema.items, function (item) { return item.massUpdate; });
+        schema.groupBy = schema.groupBy === "false" ? false : schema.groupBy;
+        schema.canMassUpdate = !!_.find(schema.items, function (item) {
+          return item.massUpdate && item.name.indexOf('.') === -1;
+        });
 
         element.show();
         doInit();

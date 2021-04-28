@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -42,9 +42,27 @@ public class PostgreSQLDialect extends PostgreSQL94Dialect {
     }
   }
 
+  static class JsonSetFunction extends AbstractJsonSetFunction {
+
+    public JsonSetFunction() {
+      super("jsonb_set");
+    }
+
+    @Override
+    protected String transformPath(String path) {
+      return "'{" + path.replace('.', ',') + "}'";
+    }
+
+    @Override
+    protected Object transformValue(Object value) {
+      return String.format("to_jsonb(%s)", value);
+    }
+  }
+
   public PostgreSQLDialect() {
     super();
     registerColumnType(Types.OTHER, "jsonb");
+    registerFunction("json_set", new JsonSetFunction());
     registerFunction("json_extract", new JsonExtractFunction(StandardBasicTypes.STRING, null));
     registerFunction("json_extract_text", new JsonExtractFunction(StandardBasicTypes.STRING, null));
     registerFunction(

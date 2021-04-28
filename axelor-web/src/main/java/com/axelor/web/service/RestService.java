@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -44,7 +44,9 @@ import com.axelor.mail.web.MailController;
 import com.axelor.meta.MetaFiles;
 import com.axelor.meta.MetaStore;
 import com.axelor.meta.db.MetaFile;
+import com.axelor.meta.db.MetaModule;
 import com.axelor.meta.db.repo.MetaFileRepository;
+import com.axelor.meta.db.repo.MetaModuleRepository;
 import com.axelor.meta.service.MetaService;
 import com.axelor.rpc.ActionRequest;
 import com.axelor.rpc.ActionResponse;
@@ -55,7 +57,6 @@ import com.axelor.rpc.filter.Filter;
 import com.axelor.rpc.filter.JPQLFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.CaseFormat;
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Longs;
@@ -63,22 +64,24 @@ import com.google.inject.servlet.RequestScoped;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import javax.inject.Inject;
+import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.DefaultValue;
@@ -110,6 +113,8 @@ public class RestService extends ResourceService {
   @Inject private MailMessageRepository messages;
 
   @Inject private MailFollowerRepository followers;
+
+  @Inject private HttpServletRequest httpRequest;
 
   private Response fail() {
     final Response response = new Response();
@@ -190,13 +195,15 @@ public class RestService extends ResourceService {
 
     request.setModel(getModel());
     Response response = getResource().fetch(id, request);
+    Optional<Map<String, Object>> values =
+        Optional.ofNullable(response.getItem(0)).map(Map.class::cast);
 
-    final long attachments = getAttachmentCount(id);
-
-    if (response.getItem(0) != null) {
-      @SuppressWarnings("all")
-      Map<String, Object> item = (Map) response.getItem(0);
+    if (values.isPresent()) {
+      final long attachments = getAttachmentCount(id);
+      final Object processInstanceId = findProcessInstanceId(request.getBeanClass(), id);
+      final Map<String, Object> item = values.get();
       item.put("$attachments", attachments);
+      item.put("$processInstanceId", processInstanceId);
     }
 
     return response;
@@ -216,6 +223,15 @@ public class RestService extends ResourceService {
         .bind("relatedId", relatedId)
         .cacheable()
         .count();
+  }
+
+  private Object findProcessInstanceId(Class<?> klass, long id) {
+    final MetaModule bpm = Beans.get(MetaModuleRepository.class).findByName("axelor-bpm");
+    if (bpm != null && Objects.equals(bpm.getInstalled(), Boolean.TRUE)) {
+      Object bean = JPA.em().find(klass, id);
+      return Mapper.of(klass).get(bean, "processInstanceId");
+    }
+    return null;
   }
 
   @POST
@@ -414,77 +430,12 @@ public class RestService extends ResourceService {
       throws IOException {
 
     final Class klass = getResource().getModel();
-    boolean permittedByParent = false;
+    final boolean permittedByParent;
 
     if (MetaFile.class.isAssignableFrom(klass)) {
-      // Check for permission on parent record.
-      if (parentId != null && StringUtils.notBlank(parentModel)) {
-        try {
-          final Class<? extends Model> parentClass =
-              (Class<? extends Model>) Class.forName(parentModel);
-          final Model parent = JpaRepository.of(parentClass).find(parentId);
-
-          if (parent != null) {
-            final Mapper mapper = Mapper.of(parentClass);
-            final Context context = new Context(Mapper.toMap(parent), parentClass);
-
-            for (final Property property : mapper.getProperties()) {
-              if (property.isJson()) {
-                final Map<String, Object> jsonFields =
-                    MetaStore.findJsonFields(parentModel, property.getName());
-                for (final Entry<String, Object> entry : jsonFields.entrySet()) {
-                  final Map<String, Object> value = (Map<String, Object>) entry.getValue();
-                  if (value != null) {
-                    final String target = (String) value.get("target");
-                    if (target != null && MetaFile.class.isAssignableFrom(Class.forName(target))) {
-                      final MetaFile metaFile = (MetaFile) context.get(entry.getKey());
-                      if (metaFile != null && Objects.equals(metaFile.getId(), id)) {
-                        permittedByParent =
-                            Beans.get(JpaSecurity.class)
-                                .isPermitted(JpaSecurity.CAN_READ, parentClass, parentId);
-                        break;
-                      }
-                    }
-                  }
-                }
-              } else if (property.getTarget() != null
-                  && MetaFile.class.isAssignableFrom(property.getTarget())) {
-                final MetaFile metaFile = (MetaFile) context.get(property.getName());
-                if (metaFile != null && Objects.equals(metaFile.getId(), id)) {
-                  permittedByParent =
-                      Beans.get(JpaSecurity.class)
-                          .isPermitted(JpaSecurity.CAN_READ, parentClass, parentId);
-                  break;
-                }
-              }
-            }
-          }
-        } catch (ClassNotFoundException e) {
-          // Ignore
-        }
-      }
-
-      // Check for permission on DMS file.
-      if (!permittedByParent) {
-        final User user = AuthUtils.getUser();
-
-        if (user != null) {
-          if (JpaRepository.of(DMSFile.class)
-                  .all()
-                  .filter(
-                      ""
-                          + "self.metaFile.id = :id "
-                          + "AND (self.permissions.group = :group "
-                          + "OR self.permissions.user = :user)")
-                  .bind("id", id)
-                  .bind("group", user.getGroup())
-                  .bind("user", user)
-                  .fetchOne()
-              != null) {
-            permittedByParent = true;
-          }
-        }
-      }
+      permittedByParent = checkMetaFileParentPermission(id, parentId, parentModel);
+    } else {
+      permittedByParent = false;
     }
 
     if (!permittedByParent && !getResource().isPermitted(JpaSecurity.CAN_READ, id)) {
@@ -532,6 +483,113 @@ public class RestService extends ResourceService {
     return javax.ws.rs.core.Response.ok(data)
         .header("Content-Disposition", "attachment; filename=\"" + fileName + "\"")
         .build();
+  }
+
+  private boolean checkMetaFileParentPermission(Long id, Long parentId, String parentModel) {
+    // Check for permission on specified parent.
+    if (parentId != null && StringUtils.notBlank(parentModel)) {
+      try {
+        if (checkMetaFileParent(id, parentId, parentModel)) {
+          return true;
+        }
+      } catch (ClassNotFoundException e) {
+        // ignore
+      }
+    }
+
+    // Check for permission on related DMS file.
+    final User user = AuthUtils.getUser();
+    return user != null
+        && JpaRepository.of(DMSFile.class)
+                .all()
+                .filter(
+                    ""
+                        + "self.metaFile.id = :id "
+                        + "AND (self.permissions.group = :group "
+                        + "OR self.permissions.user = :user)")
+                .bind("id", id)
+                .bind("group", user.getGroup())
+                .bind("user", user)
+                .fetchOne()
+            != null;
+  }
+
+  private boolean checkMetaFileParent(Long id, Long parentId, String parentModel)
+      throws ClassNotFoundException {
+    @SuppressWarnings("unchecked")
+    final Class<? extends Model> parentClass = (Class<? extends Model>) Class.forName(parentModel);
+    final Model parent = JpaRepository.of(parentClass).find(parentId);
+
+    // Check permission on parent.
+    if (parent == null
+        || !Beans.get(JpaSecurity.class)
+            .isPermitted(JpaSecurity.CAN_READ, parentClass, parent.getId())) {
+      return false;
+    }
+
+    final Mapper mapper = Mapper.of(parentClass);
+    final Context context = new Context(Mapper.toMap(parent), parentClass);
+
+    // Make sure specified meta file exists on parent.
+    for (final Property property : mapper.getProperties()) {
+      if (property.isJson() && checkMetaFileJsonProperty(property, id, context, parentModel)
+          || property.getTarget() != null
+              && MetaFile.class.isAssignableFrom(property.getTarget())
+              && checkMetaFileProperty(property, id, context)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private boolean checkMetaFileProperty(Property property, Long id, Context context) {
+    return property.isReference() && checkMetaFileExists(id, context.get(property.getName()))
+        || property.isCollection()
+            && checkMetaFileInCollection(id, context.get(property.getName()));
+  }
+
+  private boolean checkMetaFileJsonProperty(
+      Property property, Long id, Context context, String parentModel)
+      throws ClassNotFoundException {
+    final Map<String, Object> jsonFields =
+        MetaStore.findJsonFields(parentModel, property.getName());
+
+    for (final Entry<String, Object> entry : jsonFields.entrySet()) {
+      @SuppressWarnings("unchecked")
+      final Map<String, Object> value = (Map<String, Object>) entry.getValue();
+
+      if (value == null) {
+        continue;
+      }
+
+      final String target = (String) value.get("target");
+
+      if (target != null && MetaFile.class.isAssignableFrom(Class.forName(target))) {
+        final String type = (String) value.getOrDefault("type", "null");
+
+        if (type.endsWith("-to-one") && checkMetaFileExists(id, context.get(entry.getKey()))
+            || type.endsWith("-to-many")
+                && checkMetaFileInCollection(id, context.get(entry.getKey()))) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private boolean checkMetaFileExists(Long id, Object metaFileObj) {
+    return checkMetaFileInCollection(id, Collections.singletonList(metaFileObj));
+  }
+
+  private boolean checkMetaFileInCollection(Long id, Object metaFilesObj) {
+    @SuppressWarnings("unchecked")
+    final Collection<MetaFile> metaFiles = (Collection<MetaFile>) metaFilesObj;
+
+    return metaFiles
+        .parallelStream()
+        .anyMatch(metaFile -> metaFile != null && Objects.equals(metaFile.getId(), id));
   }
 
   @POST
@@ -586,14 +644,32 @@ public class RestService extends ResourceService {
     return getResource().perms();
   }
 
-  private static Charset csvCharset = Charsets.ISO_8859_1;
+  private static final Charset CSV_CHARSET;
+  private static final Locale CSV_LOCALE;
+  private static final Character CSV_SEPARATOR;
 
   static {
-    try {
-      csvCharset =
-          Charset.forName(AppSettings.get().get(AvailableAppSettings.DATA_EXPORT_ENCODING));
-    } catch (Exception e) {
+    final AppSettings settings = AppSettings.get();
+
+    final String encoding = settings.get(AvailableAppSettings.DATA_EXPORT_ENCODING, "UTF-8");
+    CSV_CHARSET = Charset.forName(encoding);
+
+    final String locale = settings.get(AvailableAppSettings.DATA_EXPORT_LOCALE, null);
+    if (locale != null) {
+      CSV_LOCALE = Locale.forLanguageTag(locale.replace("_", "-"));
+    } else {
+      CSV_LOCALE = null;
     }
+
+    final String separator =
+        Optional.ofNullable(settings.get(AvailableAppSettings.DATA_EXPORT_SEPARTOR))
+            .filter(StringUtils::notEmpty)
+            .orElse(";");
+    if (separator.length() != 1) {
+      throw new IllegalArgumentException(
+          String.format("Illegal data export separator: %s", separator));
+    }
+    CSV_SEPARATOR = separator.charAt(0);
   }
 
   @HEAD
@@ -634,26 +710,12 @@ public class RestService extends ResourceService {
       return fail();
     }
 
-    final Response response = new Response();
-    final Map<String, Object> data = new HashMap<>();
-
     request.setModel(getModel());
     updateContext(request);
 
-    try {
-      final java.nio.file.Path tempFile = MetaFiles.createTempFile(null, ".csv");
-      try (final OutputStream os = new FileOutputStream(tempFile.toFile())) {
-        try (final Writer writer = new OutputStreamWriter(os, csvCharset)) {
-          data.put("exportSize", getResource().export(request, writer));
-        }
-      }
-      data.put("fileName", tempFile.toFile().getName());
-      response.setData(data);
-    } catch (IOException e) {
-      response.setException(e);
-    }
-
-    return response;
+    // ServletRequest#getLocale() returns server locale if no Accept-Language header is set.
+    final Locale locale = CSV_LOCALE != null ? CSV_LOCALE : httpRequest.getLocale();
+    return getResource().export(request, CSV_CHARSET, locale, CSV_SEPARATOR);
   }
 
   @GET

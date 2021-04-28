@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -277,7 +277,7 @@ function BarLayout(items, attrs, $scope, $compile) {
   items.each(function(item, i) {
     var elem = $(this);
     var prop = elem.scope().field || {};
-    if (elem.attr('x-sidebar')) {
+    if (_.toBoolean(elem.attr('x-sidebar'))) {
       elem.appendTo(side);
     } else {
       elem.appendTo(wrap);
@@ -295,6 +295,7 @@ function BarLayout(items, attrs, $scope, $compile) {
   }
 
   wrap.children('[ui-panel-mail]').appendTo(main);
+  wrap.children('[ui-wkf-status]').prependTo(main);
 
   if (side.children().length > 0) {
     side.appendTo(row.addClass('has-side'));
@@ -316,7 +317,7 @@ ui.directive('uiBarLayout', ['$compile', function($compile) {
     element.append(layout);
     element.addClass('bar-layout');
 
-    if (element.has('[x-sidebar]').length === 0) {
+    if (element.has('[x-sidebar=true]').length === 0) {
       css = "mid";
     }
     if (element.is('form') && ["mini", "mid", "large"].indexOf(schema.width) > -1) {
@@ -565,12 +566,12 @@ ui.directive('uiPanelEditor', ['$compile', 'ActionService', function($compile, A
         return scope.form && scope.form.$valid;
       };
 
-      function isEmpty(record) {
+      function isClean(record) {
         if (!record || _.isEmpty(record)) return true;
         var values = _.filter(record, function (value, name) {
           return !(/[\$_]/.test(name) || value === null || value === undefined);
         });
-        return values.length === 0;
+        return values.length === 0 && !record.$changed;
       }
 
       scope.$watch(function editorValidWatch() {
@@ -578,7 +579,7 @@ ui.directive('uiPanelEditor', ['$compile', 'ActionService', function($compile, A
           return;
         }
         var valid = scope.isValid();
-        if (!valid && !field.jsonFields && !scope.$parent.isRequired() && isEmpty(scope.record)) {
+        if (!valid && !field.jsonFields && !scope.$parent.isRequired() && isClean(scope.record)) {
           var errors = (scope.form || {}).$error || {};
           valid = !errors.valid;
         }

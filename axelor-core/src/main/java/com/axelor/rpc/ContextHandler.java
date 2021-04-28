@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -253,6 +253,11 @@ public class ContextHandler<T> {
         return null;
       }
       return ctx.put(name, args[1]);
+    }
+    if ("containsKey".equals(method.getName())) {
+      return beanMapper.getGetter(name) != null
+          || getJsonContext().containsKey(name)
+          || getJsonContext().hasField(name);
     }
     throw new UnsupportedOperationException("cannot call '" + method + "' on proxy object");
   }

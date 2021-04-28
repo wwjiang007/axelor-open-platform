@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -27,9 +27,11 @@ import com.axelor.auth.db.User;
 import com.axelor.common.ObjectUtils;
 import com.axelor.common.StringUtils;
 import com.axelor.db.JPA;
+import com.axelor.db.JpaSecurity;
 import com.axelor.db.Model;
 import com.axelor.db.QueryBinder;
 import com.axelor.db.mapper.Mapper;
+import com.axelor.i18n.I18n;
 import com.axelor.inject.Beans;
 import com.axelor.meta.ActionExecutor;
 import com.axelor.meta.MetaFiles;
@@ -78,12 +80,13 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import javax.inject.Inject;
+import javax.persistence.PersistenceException;
 import javax.persistence.Query;
 import javax.persistence.TypedQuery;
-import org.hibernate.query.internal.AbstractProducedQuery;
-import org.hibernate.transform.AliasToEntityMapResultTransformer;
+import org.hibernate.transform.BasicTransformerAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,7 +105,11 @@ public class MetaService {
   @Inject private ActionExecutor actionExecutor;
 
   private boolean canShow(
-      MenuItem item, Map<String, MenuItem> map, Set<String> visited, ScriptHelper helper) {
+      MenuItem item,
+      Map<String, MenuItem> map,
+      Set<String> visited,
+      ScriptHelper helper,
+      Boolean withParentCheck) {
     if (visited == null) {
       visited = new HashSet<>();
     }
@@ -114,14 +121,17 @@ public class MetaService {
     if (item.getHidden() == Boolean.TRUE || !test(item, helper)) {
       return false;
     }
-    if (item.getParent() == null) {
+    if (item.getParent() == null || !withParentCheck) {
       return true;
     }
     final MenuItem parent = map.get(item.getParent());
     if (parent == null) {
+      // At this point, if the parent is not present in the map,
+      // we consider that he is hidden, so the child can be shown.
       return false;
     }
-    return canShow(parent, map, visited, helper);
+    // Recursively check for the parents visibilities
+    return canShow(parent, map, visited, helper, true);
   }
 
   private boolean test(MenuItem item, ScriptHelper helper) {
@@ -136,10 +146,16 @@ public class MetaService {
     return helper.test(condition);
   }
 
-  private List<MenuItem> filter(Collection<MenuItem> items) {
+  /**
+   * Filters list of <code>MenuItem</code>
+   *
+   * @param items the list to filter
+   * @param withParentCheck whether to exclude child menus if related parent is excluded
+   * @return new list of <code>MenuItem</code> filtered.
+   */
+  private List<MenuItem> filter(Collection<MenuItem> items, Boolean withParentCheck) {
 
-    final Map<String, MenuItem> map = new LinkedHashMap<>();
-    final Set<String> visited = new HashSet<>();
+    final Map<String, MenuItem> visited = new LinkedHashMap<>();
     final List<MenuItem> all = new ArrayList<>();
 
     final Map<String, Object> vars = new HashMap<>();
@@ -147,18 +163,15 @@ public class MetaService {
 
     for (MenuItem item : items) {
       final String name = item.getName();
-      if (visited.contains(name)) {
+      if (visited.containsKey(name)) {
         continue;
       }
-      visited.add(name);
-      if (item.getHidden() != Boolean.TRUE) {
-        map.put(name, item);
-      }
+      visited.put(name, item);
     }
 
-    for (final String name : map.keySet()) {
-      final MenuItem item = map.get(name);
-      if (canShow(item, map, null, scriptHelper)) {
+    for (final String name : visited.keySet()) {
+      final MenuItem item = visited.get(name);
+      if (canShow(item, visited, null, scriptHelper, withParentCheck)) {
         all.add(item);
       }
     }
@@ -219,17 +232,28 @@ public class MetaService {
       request.setModel(action.getModel());
       request.setData(new HashMap<String, Object>());
       try {
+        final JpaSecurity security = Beans.get(JpaSecurity.class);
+        final List<Filter> filters = new ArrayList<>();
+        final Class<? extends Model> modelClass = (Class<? extends Model>) request.getBeanClass();
+        final Filter securityFilter = security.getFilter(JpaSecurity.CAN_READ, modelClass);
+        if (securityFilter != null) {
+          filters.add(securityFilter);
+        } else if (!security.isPermitted(JpaSecurity.CAN_READ, modelClass)) {
+          return null;
+        }
         final Map<String, Object> data =
             (Map) ((Map) actionExecutor.execute(request).getItem(0)).get("view");
-        final Map<String, Object> context = (Map) data.get("context");
+        final Map<String, Object> params = (Map<String, Object>) data.get("params");
+        if (params == null || !Boolean.TRUE.equals(params.get("showArchived"))) {
+          filters.add(new JPQLFilter("self.archived IS NULL OR self.archived = FALSE"));
+        }
         final String domain = (String) data.get("domain");
-        final List<Filter> filters =
-            Lists.newArrayList(new JPQLFilter("self.archived IS NULL OR self.archived = FALSE"));
         if (StringUtils.notBlank(domain)) {
           filters.add(JPQLFilter.forDomain(domain));
         }
         final Filter filter = Filter.and(filters);
-        return String.valueOf(filter.build((Class) request.getBeanClass()).bind(context).count());
+        final Map<String, Object> context = (Map) data.get("context");
+        return String.valueOf(filter.build(modelClass).bind(context).count());
       } catch (Exception e) {
         LOG.error("Unable to read tag for menu: {}", item.getName());
         LOG.trace("Error", e);
@@ -387,6 +411,7 @@ public class MetaService {
       item.setTitle(menu.getTitle());
       item.setIcon(menu.getIcon());
       item.setIconBackground(menu.getIconBackground());
+      item.setHasTag(menu.getTagCount() || StringUtils.notEmpty(menu.getTagGet()));
       item.setTagStyle(menu.getTagStyle());
       item.setTop(menu.getTop());
       item.setLeft(menu.getLeft());
@@ -410,7 +435,7 @@ public class MetaService {
       menus.put(item, menu);
     }
 
-    final List<MenuItem> items = filter(menus.keySet());
+    final List<MenuItem> items = filter(menus.keySet(), true);
     items.forEach(item -> item.setTag(getTag(menus.get(item))));
 
     return items;
@@ -469,7 +494,7 @@ public class MetaService {
       menus.add(item);
     }
 
-    return filter(menus);
+    return filter(menus, false);
   }
 
   public Action getAction(String name) {
@@ -501,7 +526,15 @@ public class MetaService {
     final Response response = new Response();
     final String xml = XMLViews.toXml(view, true);
 
-    MetaViewCustom entity = customViews.findByUser(view.getName(), user);
+    if (Objects.equals(view.getCustomViewShared(), Boolean.TRUE) && !AuthUtils.isAdmin(user)) {
+      throw new PersistenceException(I18n.get("You are not allowed to share custom views."));
+    }
+
+    MetaViewCustom entity =
+        view.getCustomViewId() == null
+            ? customViews.findByUser(view.getName(), user)
+            : customViews.find(view.getCustomViewId());
+
     if (entity == null) {
       entity = new MetaViewCustom();
       entity.setName(view.getName());
@@ -512,6 +545,7 @@ public class MetaService {
 
     entity.setTitle(view.getTitle());
     entity.setXml(xml);
+    entity.setShared(view.getCustomViewShared());
 
     customViews.save(entity);
 
@@ -530,6 +564,19 @@ public class MetaService {
         JPA.em().createQuery("DELETE FROM MetaViewCustom self WHERE self.name = :name");
     deleteQuery.setParameter("name", view.getName());
     return deleteQuery.executeUpdate();
+  }
+
+  @Transactional
+  public int removeCustomViews(MetaView view, User user) {
+    if (view == null || StringUtils.isBlank(view.getName()) || user == null) {
+      return 0;
+    }
+
+    return com.axelor.db.Query.of(MetaViewCustom.class)
+        .filter("self.name = :name AND self.user = :user")
+        .bind("name", view.getName())
+        .bind("user", user)
+        .delete();
   }
 
   @SuppressWarnings("all")
@@ -853,9 +900,25 @@ public class MetaService {
     return response;
   }
 
+  @SuppressWarnings("deprecation")
   private void transformQueryResult(Query query) {
     // TODO: fix deprecation when new transformer api is implemented in hibernate
-    ((AbstractProducedQuery<?>) query)
-        .setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
+    query.unwrap(org.hibernate.query.Query.class).setResultTransformer(new DataSetTransformer());
+  }
+
+  @SuppressWarnings("serial")
+  private static final class DataSetTransformer extends BasicTransformerAdapter {
+
+    @Override
+    public Object transformTuple(Object[] tuple, String[] aliases) {
+      Map<String, Object> result = new LinkedHashMap<>(tuple.length);
+      for (int i = 0; i < tuple.length; ++i) {
+        String alias = aliases[i];
+        if (alias != null) {
+          result.put(alias, tuple[i]);
+        }
+      }
+      return result;
+    }
   }
 }

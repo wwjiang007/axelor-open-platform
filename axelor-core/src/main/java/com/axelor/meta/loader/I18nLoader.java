@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -19,24 +19,20 @@ package com.axelor.meta.loader;
 
 import com.axelor.common.FileUtils;
 import com.axelor.common.StringUtils;
+import com.axelor.common.csv.CSVFile;
 import com.axelor.db.JPA;
 import com.axelor.meta.MetaScanner;
 import com.axelor.meta.db.MetaTranslation;
 import com.axelor.meta.db.repo.MetaTranslationRepository;
-import com.google.common.base.Charsets;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
 import com.google.inject.persist.Transactional;
-import com.opencsv.CSVParser;
-import com.opencsv.CSVReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -44,6 +40,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 
 public class I18nLoader extends AbstractParallelLoader {
 
@@ -122,7 +120,6 @@ public class I18nLoader extends AbstractParallelLoader {
 
   private void process(InputStream stream, String fileName) throws IOException {
     // Get language name from the file name
-    String language = "";
     Pattern pattern = Pattern.compile(".*(?:messages_|custom_)([a-zA-Z_]+)\\.csv$");
     Matcher matcher = pattern.matcher(fileName);
 
@@ -130,23 +127,20 @@ public class I18nLoader extends AbstractParallelLoader {
       return;
     }
 
-    language = matcher.group(1);
+    final String language = matcher.group(1);
+    final CSVFile csv = CSVFile.DEFAULT.withFirstRecordAsHeader();
 
-    try (Reader reader = new InputStreamReader(stream, Charsets.UTF_8);
-        CSVReader csvReader =
-            new CSVReader(
-                reader, CSVParser.DEFAULT_SEPARATOR, CSVParser.DEFAULT_QUOTE_CHARACTER, '\0')) {
-
-      String[] fields = csvReader.readNext();
-      String[] values = null;
+    try (CSVParser csvParser = csv.parse(stream, StandardCharsets.UTF_8)) {
 
       int counter = 0;
 
-      while ((values = csvReader.readNext()) != null) {
-        if (isEmpty(values)) {
+      for (CSVRecord record : csvParser) {
+
+        if (CSVFile.isEmpty(record)) {
           continue;
         }
-        Map<String, String> map = toMap(fields, values);
+
+        Map<String, String> map = record.toMap();
 
         String key = map.get("key");
         String message = map.get("message");
@@ -173,19 +167,5 @@ public class I18nLoader extends AbstractParallelLoader {
         }
       }
     }
-  }
-
-  private Map<String, String> toMap(String[] fields, String[] values) {
-    Map<String, String> map = Maps.newHashMap();
-    for (int i = 0; i < fields.length; i++) {
-      map.put(fields[i], values[i]);
-    }
-    return map;
-  }
-
-  private boolean isEmpty(String[] line) {
-    if (line == null || line.length == 0) return true;
-    if (line.length == 1 && (line[0] == null || "".equals(line[0].trim()))) return true;
-    return false;
   }
 }

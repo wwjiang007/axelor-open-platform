@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -215,8 +215,12 @@ class Property {
     def mappedBy = getMappedBy()
 
     if (type == "one-to-one" && mappedBy) {
-      return """${getGetter()}().set${firstUpper(mappedBy)}(null);
-\t\t${name}.set${firstUpper(mappedBy)}(this);
+      return """if (${getGetter()}() != null) {
+\t\t\t${getGetter()}().set${firstUpper(mappedBy)}(null);
+\t\t}
+\t\tif (${name} != null) {
+\t\t\t${name}.set${firstUpper(mappedBy)}(this);
+\t\t}
 \t\tthis.$name = $name;"""
     }
 
@@ -336,10 +340,17 @@ class Property {
     return attrs["sequence"]
   }
 
+  boolean isEqualsInclude() {
+    if (name == "id" || name == "version") return false
+    if (attrs["equalsInclude"] == "false") return false
+    if (attrs["equalsInclude"] == "true" || isUnique()) return true
+    return entity.equalsIncludeAll && isSimple() && !isVirtual()
+  }
+
   boolean isHashKey() {
     if (name == "id" || name == "version") return false
     if (attrs["hashKey"] == "false") return false
-    if (attrs["hashKey"] == "true" || isUnique()) return true
+    if (attrs["hashKey"] == "true") return true
     return entity.hashAll && isSimple() && !isVirtual()
   }
 
@@ -450,6 +461,7 @@ class Property {
   List<Annotation> getAnnotations() {
     [
       $id(),
+      $equalsInclude(),
       $hashKey(),
       $widget(),
       $binary(),
@@ -489,6 +501,8 @@ class Property {
     def column = attrs.column
     def unique = attrs.unique
     def nullable = attrs.required == "true" ? null : attrs.nullable
+    def insertable = attrs.insertable == "false" ? attrs.insertable : null
+    def updatable = attrs.updatable == "false" ? attrs.updatable : null
 
     if (Naming.isReserved(name)) {
       throw new IllegalArgumentException(
@@ -505,7 +519,7 @@ class Property {
       "Invalid use of an SQL keyword '${col}' in domain object: ${entity.name}")
     }
 
-    if (column == null && unique == null && nullable == null)
+    if (column == null && unique == null && nullable == null && insertable == null && updatable == null)
       return null
 
     def res = annon(reference ? "javax.persistence.JoinColumn" : "javax.persistence.Column")
@@ -514,6 +528,14 @@ class Property {
 
     if (nullable) {
       res.add("nullable", nullable, false)
+    }
+
+    if (insertable != null) {
+      res.add("insertable", insertable, false)
+    }
+
+    if (updatable != null) {
+      res.add("updatable", updatable, false)
     }
 
     return res
@@ -831,6 +853,11 @@ class Property {
     def sequence = attrs.get('sequence')?.trim()
     if (!sequence) return null
     return annon("com.axelor.db.annotations.Sequence").add(sequence);
+  }
+
+  private Annotation $equalsInclude() {
+    if (!equalsInclude) return null
+    return annon("com.axelor.db.annotations.EqualsInclude", true)
   }
 
   private Annotation $hashKey() {

@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -56,6 +56,9 @@ public class CardsView extends AbstractView {
   @XmlAttribute private Boolean canEdit;
 
   @XmlAttribute private Boolean canDelete;
+
+  @XmlAttribute(name = "edit-window")
+  private String editWindow;
 
   public String getOrderBy() {
     return orderBy;
@@ -159,5 +162,13 @@ public class CardsView extends AbstractView {
 
   public void setCanDelete(Boolean canDelete) {
     this.canDelete = canDelete;
+  }
+
+  public String getEditWindow() {
+    return editWindow;
+  }
+
+  public void setEditWindow(String editWindow) {
+    this.editWindow = editWindow;
   }
 }

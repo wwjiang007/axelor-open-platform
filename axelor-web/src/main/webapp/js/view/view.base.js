@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -195,7 +195,14 @@ ui.DSViewCtrl = function DSViewCtrl(type, $scope, $element) {
 
   $scope.fields = {};
   $scope.fields_related = {};
-  $scope.schema = null;
+
+  // Prevent looped view loading
+  var parentSchema = ((($scope.$parent || {}).$parent || {}).$parent || {}).schema || {};
+  if (parentSchema.loadedLoop) {
+    $scope.schema = { loaded: true };
+  } else {
+    $scope.schema = null;
+  }
 
   $scope.show = function() {
     if (!viewPromise) {
@@ -237,12 +244,33 @@ ui.DSViewCtrl = function DSViewCtrl(type, $scope, $element) {
           })
         }];
 
+        var mergedBarsItems = ((($scope.toolbarAsMenu || [])[0] || {}).items || [])
+          .concat($scope.menubar || []);
+        $scope.mergedBars = _.isEmpty(mergedBarsItems) ? null : [{
+          icon: 'fa-wrench',
+          isButton: true,
+          items: mergedBarsItems
+        }];
+
         // watch on view.loaded to improve performance
         schema.loaded = true;
+
+        // Detect looped view loading
+        if (schema.viewId && schema.viewId === parentSchema.viewId) {
+          schema.loadedLoop = true;
+        }
       });
     }
 
-    $scope.onShow(viewPromise);
+    if ($scope.beforeOnShowEventName) {
+      var unwatchBeforeOnShowEventName = $scope.$on($scope.beforeOnShowEventName, function () {
+        delete $scope.beforeOnShowEventName;
+        unwatchBeforeOnShowEventName();
+        $scope.onShow(viewPromise);
+      });
+    } else {
+      $scope.onShow(viewPromise);
+    }
   };
 
   $scope.onShow = function(promise) {
@@ -660,7 +688,7 @@ ui.directive('uiViewCustomize', ['NavService', function(NavService) {
     template:
       "<ul ng-show='canShow()' class='nav menu-bar view-customize hidden-phone'>" +
         "<li class='dropdown menu'>" +
-          "<a class='dropdown-toggle btn' data-toggle='dropdown' title='{{ \"Customize...\" | t}}'>" +
+          "<a class='dropdown-toggle btn' data-toggle='dropdown' title='{{ \"Customize…\" | t}}'>" +
             "<i class='fa fa-wrench'></i>" +
           "</a>" +
           "<ul class='dropdown-menu pull-right'>" +
@@ -770,21 +798,25 @@ ui.directive('uiViewSwitcherMenu', function(){
 ui.directive('uiHotKeys', function() {
 
   var keys = {
-    45: 'new',		// insert
-    69: 'edit',		// e
-    83: 'save',		// s
-    68: 'delete',	// d
-    82: 'refresh',	// r
-    70: 'search',	// f
-    71: 'select',	// g
-    74: 'prev',		// j
-    75:	'next',		// n
-
-    77: 'focus-menu',		// m
-     120: 'toggle-menu',		// F9
-
-    81: 'close'		// q
-  };
+    '': {
+      120: 'toggle-menu'// F9
+    },
+    'ctrl': {
+      45: 'new',        // insert
+      69: 'edit',       // e
+      83: 'save',       // s
+      68: 'delete',     // d
+      82: 'refresh',    // r
+      74: 'prev',       // j
+      75: 'next',       // k
+      77: 'focus-menu', // m
+      81: 'close'       // q
+    },
+    'alt': {
+      70: 'search',     // f
+      71: 'select',     // g
+    }
+  }
 
   return function(scope, element, attrs) {
 
@@ -802,27 +834,34 @@ ui.directive('uiHotKeys', function() {
         return false;
       }
 
-      var action = keys[e.which];
+      // no shortcuts defined with shift or meta modifiers
+      if (e.shiftKey || e.metaKey) {
+        return;
+      }
+
+      var modifierKeys = '';
+
+      if (e.ctrlKey) {
+        modifierKeys += 'ctrl';
+      }
+
+      if (e.altKey) {
+        modifierKeys += 'alt';
+      }
+
+      var action = (keys[modifierKeys] || {})[e.which];
+
+      if (!action) {
+        return;
+      }
 
       if (action === "toggle-menu") {
         $('#offcanvas-toggle a').click();
         return false;
       }
 
-      if (e.altKey || e.shiftKey || !e.ctrlKey) {
-        return;
-      }
-
       if (action === "focus-menu") {
-        var activeMenu = $('.sidebar .nav-tree li.active');
-        if (activeMenu.length === 0) {
-          activeMenu = $('.sidebar .nav-tree li:first');
-        }
-
-        var navTree = activeMenu.parents('[nav-tree]:first');
-        if (navTree.length) {
-          navTree.navtree('selectItem', activeMenu);
-        }
+        $('.sidebar .nav-search-toggle > i').click();
         return false;
       }
 
@@ -834,7 +873,7 @@ ui.directive('uiHotKeys', function() {
         vs = dlg.scope();
       }
 
-      if (!vs || !keys.hasOwnProperty(e.which)) {
+      if (!vs) {
         return;
       }
 
@@ -846,7 +885,7 @@ ui.directive('uiHotKeys', function() {
       }
 
       if (action === "search") {
-        var filterBox = $('.filter-box .search-query:visible');
+        var filterBox = $('.filter-box :input:visible');
         if (filterBox.length) {
           filterBox.focus().select();
           return false;

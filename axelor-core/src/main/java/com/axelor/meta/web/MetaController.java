@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -19,7 +19,10 @@ package com.axelor.meta.web;
 
 import com.axelor.app.AppSettings;
 import com.axelor.app.AvailableAppSettings;
+import com.axelor.auth.AuthUtils;
+import com.axelor.auth.db.User;
 import com.axelor.common.StringUtils;
+import com.axelor.common.csv.CSVFile;
 import com.axelor.db.mapper.Mapper;
 import com.axelor.db.mapper.Property;
 import com.axelor.i18n.I18n;
@@ -28,11 +31,13 @@ import com.axelor.inject.Beans;
 import com.axelor.meta.MetaScanner;
 import com.axelor.meta.MetaStore;
 import com.axelor.meta.db.MetaAction;
+import com.axelor.meta.db.MetaAttrs;
 import com.axelor.meta.db.MetaField;
 import com.axelor.meta.db.MetaJsonField;
 import com.axelor.meta.db.MetaModel;
 import com.axelor.meta.db.MetaTranslation;
 import com.axelor.meta.db.MetaView;
+import com.axelor.meta.db.repo.MetaAttrsRepository;
 import com.axelor.meta.db.repo.MetaTranslationRepository;
 import com.axelor.meta.loader.ModuleManager;
 import com.axelor.meta.loader.XMLViews;
@@ -42,26 +47,29 @@ import com.axelor.meta.schema.actions.ActionView;
 import com.axelor.meta.service.MetaService;
 import com.axelor.rpc.ActionRequest;
 import com.axelor.rpc.ActionResponse;
+import com.axelor.rpc.Context;
+import com.axelor.script.ScriptHelper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 import com.google.inject.Inject;
-import com.opencsv.CSVReader;
-import com.opencsv.CSVWriter;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import javax.xml.bind.JAXBException;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -123,6 +131,49 @@ public class MetaController {
     response.setData(ImmutableList.of(data));
   }
 
+  private List<MetaAttrs> findAttrs(String model, String view) {
+    String filter =
+        StringUtils.isBlank(view)
+            ? "self.model = :model and self.view is null"
+            : "self.model = :model and self.view = :view";
+    MetaAttrsRepository repo = Beans.get(MetaAttrsRepository.class);
+    return repo.all().filter(filter).bind("model", model).bind("view", view).order("order").fetch();
+  }
+
+  public void moreAttrs(ActionRequest request, ActionResponse response) {
+    Context ctx = request.getContext();
+    String model = (String) ctx.get("_model");
+    String view = (String) ctx.get("_viewName");
+
+    User user = AuthUtils.getUser();
+    ScriptHelper sh = request.getScriptHelper();
+    List<MetaAttrs> attrs = new ArrayList<>(findAttrs(model, null));
+
+    if (StringUtils.notBlank(view)) {
+      attrs.addAll(findAttrs(model, view));
+    }
+
+    attrs.stream()
+        // check roles
+        .filter(
+            attr ->
+                attr.getRoles() == null
+                    || attr.getRoles().isEmpty()
+                    || attr.getRoles().stream()
+                        .anyMatch(role -> AuthUtils.hasRole(user, role.getName())))
+        // check conditions
+        .filter(attr -> sh.test(attr.getCondition()))
+        // set attrs
+        .forEach(
+            attr -> {
+              final Object value =
+                  attr.getName().matches("readonly|required|recommend|hidden|collapse")
+                      ? sh.test(attr.getValue())
+                      : sh.eval(attr.getValue());
+              response.setAttr(attr.getField(), attr.getName(), value);
+            });
+  }
+
   /** This action is called from custom fields form when context field is changed. */
   public void contextFieldChange(ActionRequest request, ActionResponse response) {
     final MetaJsonField jsonField = request.getContext().asType(MetaJsonField.class);
@@ -152,14 +203,25 @@ public class MetaController {
   public void clearCache(ActionRequest request, ActionResponse response) {
     if (request.getBeanClass() != null && MetaView.class.isAssignableFrom(request.getBeanClass())) {
       final MetaView view = request.getContext().asType(MetaView.class);
-      int deleted = Beans.get(MetaService.class).removeCustomViews(view);
-      if (deleted > 0) {
-        response.setNotify(
-            I18n.get(
-                "{0} customized view is deleted.", "{0} customized views are deleted.", deleted));
+      if (!Objects.equals(view.getType(), "grid")) {
+        int deleted = Beans.get(MetaService.class).removeCustomViews(view);
+        if (deleted > 0) {
+          response.setNotify(
+              I18n.get(
+                  "{0} customized view is deleted.", "{0} customized views are deleted.", deleted));
+        }
       }
     }
     MetaStore.clear();
+  }
+
+  public void removeUserCustomViews(ActionRequest request, ActionResponse response) {
+    if (!MetaView.class.isAssignableFrom(request.getBeanClass())) {
+      throw new IllegalArgumentException(String.valueOf(request.getBeanClass()));
+    }
+
+    final MetaView view = request.getContext().asType(MetaView.class);
+    Beans.get(MetaService.class).removeCustomViews(view, AuthUtils.getUser());
   }
 
   /**
@@ -191,12 +253,13 @@ public class MetaController {
       MetaStore.clear();
       I18nBundle.invalidate();
       final Duration duration = Duration.between(startInstant, Instant.now());
-      final LocalTime durationTime = LocalTime.MIN.plusSeconds(duration.getSeconds());
+      final String durationTime =
+          LocalTime.MIN.plusSeconds(duration.getSeconds()).format(DateTimeFormatter.ISO_LOCAL_TIME);
       response.setNotify(
           String.format(I18n.get("All views have been restored (%s)."), durationTime)
               + "<br>"
               + I18n.get("Please refresh your browser to see updated views."));
-      log.info("Restore meta time: {}", LocalTime.MIN.plusSeconds(duration.getSeconds()));
+      log.info("Restore meta time: {}", durationTime);
     } catch (Exception e) {
       response.setException(e);
     }
@@ -217,20 +280,17 @@ public class MetaController {
     String lang = name.substring(9, name.length() - 4);
     Path target = path.resolve(Paths.get(module, "src/main/resources/i18n", name));
 
-    List<String[]> items = new ArrayList<>();
-    CSVReader reader = new CSVReader(new InputStreamReader(file.openStream()));
-    try {
-      String[] header = reader.readNext();
-      String[] values = null;
-      while ((values = reader.readNext()) != null) {
-        if (header.length != values.length) {
+    final List<String[]> items = new ArrayList<>();
+    final CSVFile csv = CSVFile.DEFAULT.withFirstRecordAsHeader();
+
+    try (CSVParser csvParser = csv.parse(file.openStream(), StandardCharsets.UTF_8)) {
+      for (CSVRecord record : csvParser) {
+
+        if (CSVFile.isEmpty(record)) {
           continue;
         }
 
-        final Map<String, String> map = new HashMap<>();
-        for (int i = 0; i < header.length; i++) {
-          map.put(header[i], values[i]);
-        }
+        final Map<String, String> map = record.toMap();
 
         String key = map.get("key");
         String value = map.get("value");
@@ -246,18 +306,13 @@ public class MetaController {
         String[] row = {key, value, map.get("comment"), map.get("context")};
         items.add(row);
       }
-    } finally {
-      reader.close();
     }
 
     Files.createParentDirs(target.toFile());
 
-    CSVWriter writer = new CSVWriter(new FileWriter(target.toFile()));
-    try {
-      writer.writeNext(new String[] {"key", "message", "comment", "context"});
-      writer.writeAll(items);
-    } finally {
-      writer.close();
+    try (CSVPrinter printer = CSVFile.DEFAULT.withQuoteAll().write(target.toFile())) {
+      printer.printRecord("key", "message", "comment", "context");
+      printer.printRecords(items);
     }
   }
 

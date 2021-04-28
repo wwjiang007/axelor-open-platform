@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -20,6 +20,7 @@ package com.axelor.mail;
 import com.icegreen.greenmail.junit.GreenMailRule;
 import com.icegreen.greenmail.user.GreenMailUser;
 import com.icegreen.greenmail.util.DummySSLSocketFactory;
+import com.icegreen.greenmail.util.ServerSetup;
 import com.icegreen.greenmail.util.ServerSetupTest;
 import java.security.Security;
 import org.junit.After;
@@ -51,6 +52,9 @@ public abstract class AbstractMailTest {
   @Before
   public void startServer() {
     Security.setProperty("ssl.SocketFactory.provider", DummySSLSocketFactory.class.getName());
+    ServerSetup.SMTP.setServerStartupTimeout(5000);
+    ServerSetup.POP3.setServerStartupTimeout(5000);
+    ServerSetup.IMAP.setServerStartupTimeout(5000);
     user = server.setUser(USER_NAME, USER_PASS);
     server.start();
   }

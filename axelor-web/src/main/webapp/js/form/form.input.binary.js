@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -25,7 +25,7 @@ var BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABA
 var META_FILE = "com.axelor.meta.db.MetaFile";
 var META_JSON_RECORD = "com.axelor.meta.db.MetaJsonRecord";
 
-function makeURL(model, field, recordOrId, version, scope) {
+function makeURL(model, field, recordOrId, version, scope, parentId) {
   var value = recordOrId;
   if (!value) return null;
   var id = value.id ? value.id : value;
@@ -35,12 +35,17 @@ function makeURL(model, field, recordOrId, version, scope) {
   if (ver === undefined || ver === null) ver = (new Date()).getTime();
   if (!id || id <= 0) return null;
   var url = "ws/rest/" + model + "/" + id + "/" + field + "/download?v=" + ver;
-  if (scope && scope.record) {
-    var parentId = scope.record.id;
-    if (!parentId && scope.field && scope._jsonContext && scope._jsonContext.$record) {
-      parentId = scope._jsonContext.$record.id;
+  if (scope) {
+    if ((!parentId || parentId < 0) && scope.record) {
+      parentId = scope.record.id;
+      if ((!parentId || parentId < 0) && scope.field && scope._jsonContext && scope._jsonContext.$record) {
+        parentId = scope._jsonContext.$record.id;
+      }
     }
-    url += "&parentId=" + parentId + "&parentModel=" + scope._model;
+    if (parentId > 0) {
+      url += "&parentId=" + parentId;
+    }
+    url += "&parentModel=" + scope._model;
   }
   return url;
 }
@@ -66,7 +71,7 @@ ui.formInput('ImageLink', {
     var field = scope.field;
 
     var width = field.width || 140;
-    var height = field.height || '100%';
+    var height = field.height || 'auto';
 
     scope.styles = [{
       'width': width,
@@ -361,6 +366,7 @@ ui.formInput('BinaryLink', {
   metaWidget: true,
 
   link: function(scope, element, attrs, model) {
+    scope.prepareTemplate = true;
 
     var field = scope.field;
     var input = element.children('input:first').hide();
@@ -437,7 +443,7 @@ ui.formInput('BinaryLink', {
   '<div>' +
     '<input type="file">' +
     '<div class="btn-group">' +
-      '<button ng-click="doSelect()" ng-show="!isReadonly()" class="btn" type="button"><i class="fa fa-arrow-circle-up"></i></button>' +
+      '<button ng-click="doSelect()" ng-show="!isReadonly()" class="btn select" type="button"><i class="fa fa-arrow-circle-up"></i></button>' +
       '<button ng-click="doRemove()" ng-show="canDownload() && !isReadonly()" class="btn" type="button"><i class="fa fa-times"></i></button>' +
     '</div> ' +
     '<a ng-show="text" href="javascript:" ng-click="doSave()">{{text}}</a>' +

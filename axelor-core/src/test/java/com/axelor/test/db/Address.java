@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -19,6 +19,7 @@ package com.axelor.test.db;
 
 import com.axelor.db.EntityHelper;
 import com.axelor.db.JpaModel;
+import java.util.Objects;
 import javax.persistence.CascadeType;
 import javax.persistence.Entity;
 import javax.persistence.FetchType;
@@ -103,6 +104,25 @@ public class Address extends JpaModel {
 
   public void setContact(Contact contact) {
     this.contact = contact;
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (obj == null) return false;
+    if (this == obj) return true;
+    if (!(obj instanceof Address)) return false;
+
+    final Address other = (Address) obj;
+    if (this.getId() != null || other.getId() != null) {
+      return Objects.equals(this.getId(), other.getId());
+    }
+
+    return false;
+  }
+
+  @Override
+  public int hashCode() {
+    return 31;
   }
 
   @Override

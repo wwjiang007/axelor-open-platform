@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -62,6 +62,9 @@ public class MenuItem extends SimpleWidget {
 
   @XmlAttribute(name = "tag-style")
   private String tagStyle;
+
+  @XmlAttribute(name = "has-tag")
+  private Boolean hasTag;
 
   public String getXmlId() {
     return xmlId;
@@ -201,5 +204,13 @@ public class MenuItem extends SimpleWidget {
 
   public void setTagStyle(String tagStyle) {
     this.tagStyle = tagStyle;
+  }
+
+  public Boolean getHasTag() {
+    return hasTag;
+  }
+
+  public void setHasTag(Boolean hasTag) {
+    this.hasTag = hasTag;
   }
 }

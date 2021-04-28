@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -21,6 +21,7 @@ import com.axelor.auth.AuthUtils;
 import com.axelor.auth.db.User;
 import com.axelor.common.ObjectUtils;
 import com.axelor.common.StringUtils;
+import com.axelor.common.csv.CSVFile;
 import com.axelor.db.JPA;
 import com.axelor.db.JpaSecurity;
 import com.axelor.db.Model;
@@ -39,7 +40,6 @@ import com.axelor.script.ScriptHelper;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.primitives.Longs;
 import com.google.inject.servlet.RequestScoped;
-import com.opencsv.CSVWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -77,6 +78,7 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.StreamingOutput;
+import org.apache.commons.csv.CSVPrinter;
 import org.eclipse.persistence.annotations.Transformation;
 
 @Consumes(MediaType.APPLICATION_JSON)
@@ -315,6 +317,15 @@ public class DmsService {
       return javax.ws.rs.core.Response.status(Status.NOT_FOUND).build();
     }
 
+    if (records.stream()
+        .anyMatch(
+            record ->
+                !Boolean.TRUE.equals(record.getIsDirectory())
+                    && (record.getMetaFile() == null
+                        || !Files.exists(MetaFiles.getPath(record.getMetaFile()))))) {
+      return javax.ws.rs.core.Response.status(Status.NOT_FOUND).build();
+    }
+
     final String batchId = UUID.randomUUID().toString();
     final Map<String, Object> data = new HashMap<>();
 
@@ -402,13 +413,10 @@ public class DmsService {
         new StreamingOutput() {
           @Override
           public void write(OutputStream output) throws IOException, WebApplicationException {
-            final ZipOutputStream zos = new ZipOutputStream(output);
-            try {
+            try (final ZipOutputStream zos = new ZipOutputStream(output)) {
               for (DMSFile file : records) {
                 writeToZip(zos, file);
               }
-            } finally {
-              zos.close();
             }
           }
         };
@@ -462,8 +470,8 @@ public class DmsService {
                     .map(line -> line.toArray(new String[] {}))
                     .collect(Collectors.toList());
 
-            try (final CSVWriter writer = new CSVWriter(new FileWriter(file))) {
-              writer.writeAll(lines);
+            try (CSVPrinter printer = CSVFile.DEFAULT.write(file)) {
+              printer.printRecords(lines);
             }
 
             return file;
@@ -516,7 +524,7 @@ public class DmsService {
       return files;
     }
     final File relatedFile = getFile(file);
-    if (relatedFile != null) {
+    if (relatedFile != null && relatedFile.exists()) {
       files.put(base + "/" + getFileName(file), relatedFile);
     }
     return files;

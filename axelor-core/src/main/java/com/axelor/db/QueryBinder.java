@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -17,7 +17,6 @@
  */
 package com.axelor.db;
 
-import com.axelor.common.StringUtils;
 import com.axelor.db.mapper.Adapter;
 import com.axelor.rpc.ContextEntity;
 import com.axelor.script.ScriptBindings;
@@ -175,10 +174,12 @@ public class QueryBinder {
         value = ((ContextEntity) value).getContextId();
       } else if (value instanceof Model) {
         value = ((Model) value).getId();
-      } else if (value instanceof String
-          && !StringUtils.isBlank((String) value)
-          && bindings.containsKey(value)) {
-        value = bindings.get(value);
+      } else if (value instanceof String) {
+        final String expr = (String) value;
+        if (expr.startsWith("__") && expr.endsWith("__") && bindings.containsKey(expr)) {
+          // special variable
+          value = bindings.get(expr);
+        }
       }
       try {
         param = query.getParameter(i + offset);

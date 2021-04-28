@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -299,10 +299,10 @@ ui.directive('uiWidgetStates', ['$parse', '$interpolate', function($parse, $inte
         handle(rec);
       }
     });
-    scope.$on("on:grid-selection-change", function(e, context) {
+    scope.$on("on:grid-selection-change", function(e, context, force) {
       if (field && field.jsonField) return;
-      if (scope._isNestedGrid === undefined || !scope._isNestedGrid) return;
-      if (!scope._isDetailsForm) {
+      if (!force && (scope._isNestedGrid === undefined || !scope._isNestedGrid)) return;
+      if (!scope._isDetailsForm || force) {
         handle(context);
       }
     });
@@ -430,7 +430,7 @@ ui.directive('uiWidgetStates', ['$parse', '$interpolate', function($parse, $inte
     }
 
     scope.$on("on:record-change", function(e, rec) {
-      scope.$timeout(function () {
+      scope.waitForActions(function () {
         if (field && field.jsonField) {
           handle(scope.record);
         } else if (rec && rec === scope.record) {

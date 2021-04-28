@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -21,6 +21,7 @@ import static com.axelor.common.StringUtils.isBlank;
 
 import com.axelor.app.AppSettings;
 import com.axelor.app.AvailableAppSettings;
+import com.axelor.app.internal.AppFilter;
 import com.axelor.auth.AuthService;
 import com.axelor.auth.AuthUtils;
 import com.axelor.auth.db.User;
@@ -36,6 +37,7 @@ import com.axelor.db.Query;
 import com.axelor.db.QueryBinder;
 import com.axelor.db.Repository;
 import com.axelor.db.ValueEnum;
+import com.axelor.db.annotations.Widget;
 import com.axelor.db.hibernate.type.JsonFunction;
 import com.axelor.db.mapper.Mapper;
 import com.axelor.db.mapper.Property;
@@ -51,6 +53,7 @@ import com.axelor.i18n.I18n;
 import com.axelor.i18n.I18nBundle;
 import com.axelor.i18n.L10n;
 import com.axelor.inject.Beans;
+import com.axelor.meta.MetaFiles;
 import com.axelor.meta.MetaPermissions;
 import com.axelor.meta.MetaStore;
 import com.axelor.meta.db.MetaAction;
@@ -70,13 +73,20 @@ import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.inject.TypeLiteral;
 import com.google.inject.persist.Transactional;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -85,8 +95,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.ResourceBundle;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.inject.Inject;
@@ -109,6 +123,8 @@ public class Resource<T extends Model> {
 
   private final Event<PreRequest> preRequest;
   private final Event<PostRequest> postRequest;
+
+  private static final Pattern NAME_PATTERN = Pattern.compile("[\\w\\.]+");
 
   @Inject
   @SuppressWarnings("unchecked")
@@ -506,6 +522,14 @@ public class Resource<T extends Model> {
       parentName = (String) childOn.get("parent");
     }
 
+    ImmutableList.of(modelName, parentName).stream()
+        .filter(name -> !NAME_PATTERN.matcher(name).matches())
+        .findAny()
+        .ifPresent(
+            name -> {
+              throw new IllegalArgumentException(String.format("Invalid name: %s", name));
+            });
+
     builder
         .append("SELECT new map(_parent.id as id, count(self.id) as count) FROM ")
         .append(modelName)
@@ -539,8 +563,11 @@ public class Resource<T extends Model> {
       AppSettings.get()
           .getInt(AvailableAppSettings.DATA_EXPORT_FETCH_SIZE, DEFAULT_EXPORT_FETCH_SIZE);
 
-  @SuppressWarnings("all")
-  public int export(Request request, Writer writer) throws IOException {
+  public Response export(Request request, Charset charset) {
+    return export(request, charset, AppFilter.getLocale(), ';');
+  }
+
+  public Response export(Request request, Charset charset, Locale locale, char separator) {
     security.get().check(JpaSecurity.CAN_READ, model);
     security.get().check(JpaSecurity.CAN_EXPORT, model);
 
@@ -552,9 +579,38 @@ public class Resource<T extends Model> {
 
     firePreRequestEvent(RequestEvent.EXPORT, request);
 
+    final Response response = new Response();
+    final Map<String, Object> data = new HashMap<>();
+
+    try {
+      final java.nio.file.Path tempFile = MetaFiles.createTempFile(null, ".csv");
+      try (final OutputStream os = new FileOutputStream(tempFile.toFile())) {
+        try (final Writer writer = new OutputStreamWriter(os, charset)) {
+          if (StandardCharsets.UTF_8.equals(charset)) {
+            writer.write('\ufeff');
+          }
+          data.put("exportSize", export(request, writer, locale, separator));
+        }
+      }
+      data.put("fileName", tempFile.toFile().getName());
+      response.setData(data);
+    } catch (IOException e) {
+      response.setException(e);
+    }
+
+    firePostRequestEvent(RequestEvent.EXPORT, request, response);
+
+    return response;
+  }
+
+  @SuppressWarnings("all")
+  private int export(Request request, Writer writer, Locale locale, char separator)
+      throws IOException {
+
     List<String> fields = request.getFields();
     List<String> header = new ArrayList<>();
     List<String> names = new ArrayList<>();
+    Set<String> translatableNames = new HashSet<>();
     Map<Integer, Map<String, String>> selection = new HashMap<>();
     Map<String, Map<String, Object>> jsonFieldsMap = new HashMap<>();
 
@@ -615,6 +671,8 @@ public class Resource<T extends Model> {
         }
       }
     }
+
+    final ResourceBundle bundle = I18n.getBundle(locale);
 
     for (String field : fields) {
       Iterator<String> iter = Splitter.on(".").split(field).iterator();
@@ -681,18 +739,23 @@ public class Resource<T extends Model> {
       } else if (options != null && !options.isEmpty()) {
         Map<String, String> map = new HashMap<>();
         for (Selection.Option option : options) {
-          map.put(option.getValue(), option.getLocalizedTitle());
+          final String localizedTitle = getTranslation(bundle, option.getTitle());
+          map.put(option.getValue(), localizedTitle);
         }
         selection.put(header.size(), map);
       }
 
-      title = I18n.get(title);
+      title = getTranslation(bundle, title);
 
       names.add(name);
       header.add(escapeCsv(title));
+
+      if (prop.isTranslatable()) {
+        translatableNames.add(name);
+      }
     }
 
-    writer.write(Joiner.on(";").join(header));
+    writer.write(Joiner.on(separator).join(header));
 
     int limit =
         EXPORT_MAX_SIZE > 0 ? Math.min(EXPORT_FETCH_SIZE, EXPORT_MAX_SIZE) : EXPORT_FETCH_SIZE;
@@ -704,36 +767,43 @@ public class Resource<T extends Model> {
 
     List<?> data = selector.values(limit, offset);
 
-    final L10n formatter = L10n.getInstance();
+    final L10n formatter = L10n.getInstance(locale);
 
     while (!data.isEmpty()) {
       for (Object item : data) {
         List<?> row = (List<?>) item;
         List<String> line = new ArrayList<>();
         int index = 0;
+        // Ignore first two items (id, version).
+        row = row.size() > 2 ? row.subList(2, row.size()) : Collections.emptyList();
         for (Object value : row) {
-          if (index++ < 2) continue; // ignore first two items (id, version)
           Object objValue = value == null ? "" : value;
-          if (selection.containsKey(index - 3)) {
-            objValue = selection.get(index - 3).get(objValue.toString());
+          if (selection.containsKey(index)) {
+            objValue = selection.get(index).get(objValue.toString());
           }
-          if (objValue instanceof Number) {
+          if (objValue instanceof String) {
+            if (translatableNames.contains(names.get(index))) {
+              objValue = getValueTranslation(bundle, (String) objValue);
+            }
+          } else if (objValue instanceof Number) {
             objValue = formatter.format((Number) objValue, false);
-          }
-          if (objValue instanceof LocalDate) {
+          } else if (objValue instanceof LocalDate) {
             objValue = formatter.format((LocalDate) objValue);
-          }
-          if (objValue instanceof LocalDateTime) {
+          } else if (objValue instanceof LocalTime) {
+            objValue = formatter.format((LocalTime) objValue);
+          } else if (objValue instanceof LocalDateTime) {
             objValue = formatter.format((LocalDateTime) objValue);
-          }
-          if (objValue instanceof ZonedDateTime) {
+          } else if (objValue instanceof ZonedDateTime) {
             objValue = formatter.format((ZonedDateTime) objValue);
+          } else if (objValue instanceof Enum) {
+            objValue = getTranslation(bundle, getTitle((Enum<?>) objValue));
           }
           String strValue = objValue == null ? "" : escapeCsv(objValue.toString());
           line.add(strValue);
+          ++index;
         }
         writer.write("\n");
-        writer.write(Joiner.on(";").join(line));
+        writer.write(Joiner.on(separator).join(line));
       }
 
       count += data.size();
@@ -753,9 +823,31 @@ public class Resource<T extends Model> {
     Response response = new Response();
     response.setTotal(count);
 
-    firePostRequestEvent(RequestEvent.EXPORT, request, response);
-
     return count;
+  }
+
+  private String getTranslation(ResourceBundle bundle, String text) {
+    return Optional.ofNullable(bundle.getString(text)).filter(StringUtils::notBlank).orElse(text);
+  }
+
+  private String getValueTranslation(ResourceBundle bundle, String text) {
+    final String key = "value:" + text;
+    return Optional.ofNullable(bundle.getString(key))
+        .filter(StringUtils::notBlank)
+        .filter(translation -> !Objects.equal(key, translation))
+        .orElse(text);
+  }
+
+  private String getTitle(Enum<?> value) {
+    final Field field;
+    try {
+      field = value.getClass().getField(value.name());
+    } catch (NoSuchFieldException | SecurityException e) {
+      throw new RuntimeException(e);
+    }
+    return Optional.ofNullable(field.getAnnotation(Widget.class))
+        .map(Widget::title)
+        .orElseGet(() -> Inflector.getInstance().titleize(value.toString()));
   }
 
   private String escapeCsv(String value) {
@@ -1311,6 +1403,9 @@ public class Resource<T extends Model> {
         if (child != null) {
           result.put(name, child);
         }
+        Optional.ofNullable(mapper.getProperty(name))
+            .filter(Property::isTranslatable)
+            .ifPresent(property -> Translator.translate(result, property));
       }
       return result;
     }

@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -22,7 +22,6 @@ import com.axelor.db.JPA;
 import com.axelor.db.Model;
 import com.axelor.db.mapper.Mapper;
 import com.axelor.db.mapper.Property;
-import com.axelor.events.PostAction;
 import com.axelor.meta.ActionHandler;
 import com.axelor.rpc.ActionResponse;
 import com.axelor.rpc.Resource;
@@ -117,9 +116,8 @@ public class ActionRecord extends Action {
       result = evaluate(handler, map);
     } else {
       handler.firePreEvent(getName());
-      final Object value = evaluate(handler, map);
-      final PostAction event = handler.firePostEvent(getName(), value);
-      result = event.getResult();
+      result = evaluate(handler, map);
+      handler.firePostEvent(getName(), result instanceof ActionResponse ? result : map);
     }
 
     return result == null || result instanceof ActionResponse ? result : wrapper(map);

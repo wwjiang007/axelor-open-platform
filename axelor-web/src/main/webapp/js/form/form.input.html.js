@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -251,7 +251,7 @@ function getShell(scope, textElement) {
               title: _t('Submit'),
               image: '\uf00c'
           },
-          selectImage: _t('Click or drop image'),
+          selectImage: _t('Select image'),
           placeholderUrl: 'www.example.com',
           maxImageSize: [600, 200],
     hijackContextmenu: false,
@@ -354,7 +354,24 @@ ui.formInput('Html', {
       }
     };
 
-    textElement.on('input paste change blur', _.debounce(onChange, 100));
+    var onChangePending = false;
+
+    textElement.on('input paste change', function () {
+      var value = _.str.trim(shellActive ? shell.getHTML() : textElement.val()) || null;
+      if (value !== model.$viewValue) {
+        onChangePending = true;
+      }
+    });
+
+    function doChangePending() {
+      if (onChangePending) {
+        onChangePending = false;
+        setTimeout(onChange);
+      }
+    }
+
+    textElement.on("blur", doChangePending);
+    scope.$on("on:before-save", doChangePending);
 
     textElement.on("focus", _.once(function (e) {
 
@@ -484,7 +501,7 @@ ui.formInput('HtmlInline', 'Text', {
       setTimeout(function() {
         wrapper.position({
           my: "left top",
-          at: "left bottom",
+          at: "left top",
           of: picker,
           within: container
         })
@@ -509,7 +526,9 @@ ui.formInput('HtmlInline', 'Text', {
       element.trigger('hide:slick-editor');
     }
 
-    function showPopup(show) {
+    var canShowOnFocus = true;
+
+    function showPopup(show, focusElem) {
       dropdownVisible = !!show;
       if (dropdownVisible) {
         $(document).on('mousedown', onMouseDown);
@@ -522,18 +541,28 @@ ui.formInput('HtmlInline', 'Text', {
       } else {
         $(document).off('mousedown', onMouseDown);
         wrapper.hide();
-        setTimeout(function () {
-          input.focus();
-        });
+        if (focusElem) {
+          setTimeout(function () {
+            focusElem.focus();
+          });
+        }
       }
     }
 
-    scope.togglePopup = function () {
-      showPopup(!dropdownVisible);
-    };
-
     element.on("hide:slick-editor", function(e) {
       showPopup(false);
+    });
+
+    input.on('focus', function () {
+      if (canShowOnFocus) {
+        showPopup(true);
+      } else {
+        canShowOnFocus = true;
+      }
+    });
+
+    input.on('click', function () {
+      showPopup(true);
     });
 
     input.on('keydown', function (e) {
@@ -543,32 +572,56 @@ ui.formInput('HtmlInline', 'Text', {
     });
 
     shellElement.on('blur', function () {
-      scope.setValue(shell.getHTML(), true);
+      if (!dropdownVisible) {
+        scope.setValue(shell.getHTML(), true);
+      }
     });
 
     shellElement.on('keydown', function (e) {
       if (e.keyCode === 9) { // tab key
         e.preventDefault();
-        showPopup(false);
+        showPopup(false, navigateTabbable(e.shiftKey ? -1 : 1));
       }
     });
 
+    function navigateTabbable(inc) {
+      var tabbables = element.closest('.slick-form').find(':tabbable');
+      var index = (tabbables.index(input) + inc + tabbables.length) % tabbables.length;
+      return tabbables.eq(index);
+    }
+
     scope.$watch(attrs.ngModel, function textModelWatch(value) {
-      var value = $('<div/>').html(value).text();
-      input.val(value);
+      var text = htmlToPlain(value).split('\n')[0];
+      input.val(text);
     });
+
+    function htmlToPlain(value) {
+      var html = $('<div/>').html(value);
+      var text;
+      if (typeof window.getSelection !== 'undefined'
+          && typeof document.createRange !== 'undefined') {
+        var selection = window.getSelection();
+        html.appendTo('body');
+        selection.selectAllChildren(html.get(0));
+        text = selection.toString();
+        html.remove();
+        selection.removeAllRanges();
+      } else {
+        text = html.text();
+      }
+      return text;
+    }
 
     scope.$on("$destroy", function(e){
       wrapper.remove();
       $(document).off('mousedown', onMouseDown);
     });
   },
+  template_readonly:
+    '<div class="html-viewer-inline" ui-bind-template x-text="text"></div>',
   template_editable:
-      "<span class='picker-input picker-icons-1'>" +
+      "<span>" +
         "<input type='text' readonly>" +
-        "<span class='picker-icons'>" +
-          "<i class='fa fa-pencil' title='{{ \"Edit\" | t }}' ng-click='togglePopup()'></i>" +
-        "</span>" +
       "</span>"
 });
 
@@ -594,7 +647,7 @@ ui.directive('uiBindTemplate', ['$interpolate', function($interpolate){
 
       function update() {
         var output = expand(scope, template) || "";
-        element.html(axelor.sanitize(output));
+        element.html(output);
       }
 
       scope.$watch("text", function(text, old) {

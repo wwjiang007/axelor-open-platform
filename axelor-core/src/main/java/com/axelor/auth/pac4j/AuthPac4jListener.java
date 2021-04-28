@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -21,9 +21,15 @@ import com.axelor.auth.UserAuthenticationInfo;
 import com.axelor.auth.db.User;
 import com.axelor.event.Event;
 import com.axelor.event.NamedLiteral;
+import com.axelor.events.LoginRedirectException;
 import com.axelor.events.PostLogin;
+import com.axelor.inject.Beans;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import javax.inject.Inject;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import org.apache.shiro.SecurityUtils;
 import org.apache.shiro.authc.AuthenticationException;
 import org.apache.shiro.authc.AuthenticationInfo;
@@ -31,6 +37,7 @@ import org.apache.shiro.authc.AuthenticationListener;
 import org.apache.shiro.authc.AuthenticationToken;
 import org.apache.shiro.authc.UnknownAccountException;
 import org.apache.shiro.subject.PrincipalCollection;
+import org.apache.shiro.web.util.WebUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,6 +54,7 @@ public class AuthPac4jListener implements AuthenticationListener {
       final User user = ((UserAuthenticationInfo) info).getUser();
 
       if (user != null) {
+        Beans.get(HttpServletRequest.class).changeSessionId();
         firePostLoginSuccess(token, user);
         return;
       }
@@ -69,10 +77,27 @@ public class AuthPac4jListener implements AuthenticationListener {
   }
 
   private void firePostLoginSuccess(AuthenticationToken token, User user) {
-    postLogin.select(NamedLiteral.of(PostLogin.SUCCESS)).fire(new PostLogin(token, user, null));
+    try {
+      postLogin.select(NamedLiteral.of(PostLogin.SUCCESS)).fire(new PostLogin(token, user, null));
+    } catch (LoginRedirectException e) {
+      issueRedirect(e.getLocation());
+    }
   }
 
   private void firePostLoginFailure(AuthenticationToken token, AuthenticationException ae) {
-    postLogin.select(NamedLiteral.of(PostLogin.FAILURE)).fire(new PostLogin(token, null, ae));
+    try {
+      postLogin.select(NamedLiteral.of(PostLogin.FAILURE)).fire(new PostLogin(token, null, ae));
+    } catch (LoginRedirectException e) {
+      issueRedirect(e.getLocation());
+    }
+  }
+
+  private void issueRedirect(String url) {
+    try {
+      WebUtils.issueRedirect(
+          Beans.get(HttpServletRequest.class), Beans.get(HttpServletResponse.class), url);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 }

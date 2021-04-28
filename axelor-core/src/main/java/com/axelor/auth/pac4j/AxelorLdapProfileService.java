@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -23,6 +23,7 @@ import com.axelor.auth.pac4j.AuthPac4jModuleLocal.AxelorAuthenticator;
 import com.axelor.common.ObjectUtils;
 import com.axelor.common.StringUtils;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
@@ -32,12 +33,16 @@ import java.text.MessageFormat;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
@@ -54,6 +59,8 @@ import org.ldaptive.LdapException;
 import org.ldaptive.SearchOperation;
 import org.ldaptive.SearchRequest;
 import org.ldaptive.SearchResult;
+import org.ldaptive.ad.handler.ObjectGuidHandler;
+import org.ldaptive.ad.handler.ObjectSidHandler;
 import org.ldaptive.auth.Authenticator;
 import org.ldaptive.auth.DnResolver;
 import org.ldaptive.auth.FormatDnResolver;
@@ -83,6 +90,8 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
   private final String groupsDn;
   private final String groupFilter;
 
+  protected static final String FILTER_FORMAT = "(%s=%s)";
+
   @Inject
   public AxelorLdapProfileService() {
     this(AppSettings.get().getProperties());
@@ -94,17 +103,25 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
     final String idAttribute =
         properties.getProperty(
             AvailableAppSettings.AUTH_LDAP_USER_ID_ATTRIBUTE, AxelorLdapProfileDefinition.USERNAME);
+    final String usernameAttribute =
+        properties.getProperty(
+            AvailableAppSettings.AUTH_LDAP_USER_USERNAME_ATTRIBUTE,
+            AxelorLdapProfileDefinition.USERNAME);
     final String userFilter =
         Optional.ofNullable(properties.getProperty(AvailableAppSettings.AUTH_LDAP_USER_FILTER))
             .map(property -> property.replace("{0}", "{user}"))
             .orElse(null);
+    final String userDnFormat =
+        properties.getProperty(AvailableAppSettings.AUTH_LDAP_USER_DN_FORMAT, null);
     final String systemDn = properties.getProperty(AvailableAppSettings.AUTH_LDAP_SYSTEM_USER);
     final String systemPassword =
         properties.getProperty(AvailableAppSettings.AUTH_LDAP_SYSTEM_PASSWORD);
     final String authenticationType =
         properties.getProperty(AvailableAppSettings.AUTH_LDAP_AUTH_TYPE);
     final boolean useSSL =
-        Boolean.parseBoolean(properties.getProperty(AvailableAppSettings.AUTH_LDAP_USE_SSL));
+        Optional.ofNullable(properties.getProperty(AvailableAppSettings.AUTH_LDAP_USE_SSL, null))
+            .map(Boolean::parseBoolean)
+            .orElseGet(() -> ldapUrl != null && ldapUrl.toLowerCase().startsWith("ldaps:"));
     final boolean useStartTLS =
         Boolean.parseBoolean(properties.getProperty(AvailableAppSettings.AUTH_LDAP_USE_STARTTLS));
     final String trustStore =
@@ -214,12 +231,16 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
 
     final DnResolver dnResolver;
     if (StringUtils.notBlank(userFilter)) {
-      SearchDnResolver searchDnResolver = new SearchDnResolver(connectionFactory);
+      final SearchDnResolver searchDnResolver = new SearchDnResolver(connectionFactory);
       searchDnResolver.setBaseDn(usersDn);
       searchDnResolver.setUserFilter(userFilter);
       dnResolver = searchDnResolver;
     } else {
-      dnResolver = new FormatDnResolver(String.format("%s=%%s,%s", idAttribute, usersDn));
+      final String format =
+          StringUtils.notBlank(userDnFormat)
+              ? userDnFormat
+              : String.format("%s=%%s,%s", idAttribute, usersDn);
+      dnResolver = new FormatDnResolver(format);
     }
 
     final Authenticator ldapAuthenticator = new Authenticator(dnResolver, handler);
@@ -232,14 +253,22 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
     setUsersDn(usersDn);
 
     setIdAttribute(idAttribute);
-    setUsernameAttribute(AxelorLdapProfileDefinition.USERNAME);
+    setUsernameAttribute(usernameAttribute);
     setPasswordAttribute(AxelorLdapProfileDefinition.PASSWORD);
     setProfileDefinition(new AxelorLdapProfileDefinition());
   }
 
+  public String getGroupsDn() {
+    return groupsDn;
+  }
+
+  public String getGroupFilter() {
+    return groupFilter;
+  }
+
   @Nullable
   public LdapEntry searchGroup(String groupName) {
-    final String filter = String.format("(%s=%s)", AxelorLdapGroupDefinition.NAME, groupName);
+    final String filter = String.format(FILTER_FORMAT, AxelorLdapGroupDefinition.NAME, groupName);
 
     try (final Connection conn = getConnectionFactory().getConnection()) {
       conn.open();
@@ -290,8 +319,47 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
   protected LdapProfile convertAttributesToProfile(
       List<Map<String, Object>> listStorageAttributes, String username) {
     final LdapProfile profile = super.convertAttributesToProfile(listStorageAttributes, username);
+    if (ObjectUtils.isEmpty(profile.getAttributes())) {
+      searchAndSetAttributes(profile);
+    }
     setGroup(profile);
+    setRoles(profile);
     return profile;
+  }
+
+  protected void searchAndSetAttributes(LdapProfile profile) {
+    try (final Connection conn = getConnectionFactory().getConnection()) {
+      conn.open();
+
+      final SearchOperation search = new SearchOperation(conn);
+      final SearchRequest request =
+          new SearchRequest(
+              getUsersDn(), String.format(FILTER_FORMAT, getIdAttribute(), profile.getId()));
+
+      request.setSearchEntryHandlers(new ObjectSidHandler(), new ObjectGuidHandler());
+
+      final SearchResult result = search.execute(request).getResult();
+      final Set<String> attributeKeys = profile.getAttributes().keySet();
+      final LdapEntry entry = result.getEntry();
+
+      if (entry == null) {
+        logger.error(
+            "No entry found with search filter: {}", request.getSearchFilter().getFilter());
+        return;
+      }
+
+      entry.getAttributes().stream()
+          .filter(attribute -> !attributeKeys.contains(attribute.getName()))
+          .forEach(
+              attribute -> {
+                final Object value =
+                    attribute.size() > 1 ? attribute.getStringValues() : attribute.getStringValue();
+                profile.addAttribute(attribute.getName(), value);
+              });
+
+    } catch (LdapException e) {
+      logger.error(e.getMessage(), e);
+    }
   }
 
   protected void setGroup(LdapProfile profile) {
@@ -320,7 +388,8 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
         for (final String memberAttribute :
             ImmutableList.of(
                 AxelorLdapGroupDefinition.UNIQUE_MEMBER, AxelorLdapGroupDefinition.MEMBER)) {
-          if (setGroup(profile, String.format("(%s=%s)", memberAttribute, entryId), conn) != null) {
+          if (setGroup(profile, String.format(FILTER_FORMAT, memberAttribute, entryId), conn)
+              != null) {
             break;
           }
         }
@@ -347,6 +416,29 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
     }
 
     return null;
+  }
+
+  // Set groups found via memberOf as roles
+  protected void setRoles(LdapProfile profile) {
+    final Object attr = profile.getAttribute("memberOf");
+
+    if (ObjectUtils.isEmpty(attr)) {
+      return;
+    }
+
+    @SuppressWarnings("unchecked")
+    final Collection<String> memberOf =
+        attr instanceof Collection
+            ? (Collection<String>) attr
+            : Collections.singletonList((String) attr);
+
+    memberOf.forEach(
+        groupDn ->
+            Pattern.compile("\\s*,\\s*")
+                .splitAsStream(groupDn)
+                .map(item -> item.split("\\s*=\\s*", 2))
+                .findFirst()
+                .ifPresent(item -> profile.addRole(item[1])));
   }
 
   // Fix binary attributes
@@ -412,8 +504,19 @@ public class AxelorLdapProfileService extends LdapProfileService implements Axel
     }
 
     public static String getAttributes(String idAttribute) {
+      final Set<String> excludedAttributes = Sets.newHashSet(USERNAME);
+      switch (idAttribute) {
+        case USERNAME:
+          break;
+        case DISPLAY_NAME:
+          excludedAttributes.add(DISPLAY_NAME);
+          break;
+        default:
+          throw new IllegalArgumentException(
+              String.format("Illegal ID attribute: %s", idAttribute));
+      }
       return ATTRIBUTES.stream()
-          .filter(attribute -> !attribute.equals(idAttribute))
+          .filter(attribute -> !excludedAttributes.contains(attribute))
           .collect(Collectors.joining(","));
     }
   }

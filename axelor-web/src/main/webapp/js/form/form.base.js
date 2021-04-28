@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -112,6 +112,10 @@ ui.formCompile = function(element, attrs, linkerFn) {
         resetAttrs();
       }
       scope.$$readonly = scope.$$isReadonly();
+    });
+
+    scope.$on("on:attrs-reset", function() {
+      resetAttrs();
     });
 
     scope.$on("on:attrs-changed", function(event, attr) {
@@ -231,12 +235,15 @@ ui.formCompile = function(element, attrs, linkerFn) {
 
     var hideFn = _.contains(this.handles, 'isHidden') ? angular.noop : hideWidget;
 
-    var hiddenSet = false;
-    scope.$watch("isHidden()", function isHiddenWatch(hidden, old) {
-      if (hiddenSet && hidden === old) return;
-      hiddenSet = true;
-      return hideFn(hidden);
-    });
+    // Ignore hiding of fields in editable grid
+    if (!scope.view || scope.view.type !== 'grid') {
+      var hiddenSet = false;
+      scope.$watch("isHidden()", function isHiddenWatch(hidden, old) {
+        if (hiddenSet && hidden === old) return;
+        hiddenSet = true;
+        return hideFn(hidden);
+      });
+    }
 
     var readonlySet = false;
     scope.$watch("isReadonly()", function isReadonlyWatch(readonly, old) {
@@ -312,7 +319,7 @@ ui.formDirective = function(name, object) {
 
       var self = this;
 
-      if (!this.template_editable && !this.template_readonly) {
+      if (!this.template_editable && !this.template_readonly && !scope.prepareTemplate) {
         return;
       }
 

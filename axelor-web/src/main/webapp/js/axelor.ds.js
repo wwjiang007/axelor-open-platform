@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -176,10 +176,24 @@
 
       if (meta.jsonAttrs && view && view.items) {
         if (view.type === 'grid') {
+          function findLast(array, callback) {
+            for (var index = (array || []).length - 1; index >= 0; --index) {
+              var element = array[index];
+              if (callback(element, index, array)) {
+                return element;
+              }
+            }
+          }
+
+          function lastShownIsButton(itemList) {
+            var found = findLast(itemList, function (item) { return item && !item.hidden });
+            return found && found.type === "button";
+          }
+
           view.items = (function (items) {
             var button = _.findWhere(items, { type: 'button' });
             var index = items.indexOf(button);
-            if (index < 0) {
+            if (index < 0 || !lastShownIsButton(items)) {
               index = items.length;
             }
             items.splice(index, 0, {
@@ -395,6 +409,21 @@
         items = items.sort(function (x, y) { return x.columnSequence - y.columnSequence; });
         view.items = items;
       }
+
+      if (view.type === 'form') {
+        // more attrs action
+        var moreAttrs = 'com.axelor.meta.web.MetaController:moreAttrs';
+        view.onNew = view.onNew ? view.onNew + ',' + moreAttrs : moreAttrs;
+        view.onLoad = view.onLoad ? view.onLoad + ',' + moreAttrs : moreAttrs;
+        // wkf status
+        view.items.unshift({
+          colSpan: 12,
+          type: "field",
+          name: "$wkfStatus",
+          showTitle: false,
+          widget: "WkfStatus"
+        });
+      }
     };
 
     function processJsonForm(view) {
@@ -569,6 +598,19 @@
         } else if (item.type === 'field') {
           items.push(item.name);
         }
+
+        // process tag-select
+        processWidget(item);
+        if (item.widget === 'tag-select') {
+          // fetch colors
+          if (item.colorField) {
+            (result.related[item.name] || (result.related[item.name] = [])).push(item.colorField);
+          }
+          // fetch target names
+          if (item.targetName) {
+            (result.related[item.name] || (result.related[item.name] = [])).push(item.targetName);
+          }
+        }
       });
 
       if (view.type === "calendar") {
@@ -642,6 +684,7 @@
       }
 
       function updateFields(fetched) {
+        fetched = fetched || {};
         return FIELDS.get(model).then(function (current) {
           current = current || {};
           if (current !== fetched.fields) {
@@ -708,7 +751,7 @@
           if (pending) {
             pending.then(clear, clear);
             pending.then(function (response) {
-              resolve((response.data || {}).data);
+              resolve((response && response.data || {}).data);
             });
             return promise;
           }
@@ -799,17 +842,17 @@
       return $q.defer();
     };
 
-    ViewService.prototype.action = function(action, model, context, data) {
+    ViewService.prototype.action = function(action, model, context, data, config) {
 
       var params = {
         model: model,
         action: action,
-        data: data || {
+        data: _.extend({ criteria: [] }, data, {
           context: _.extend({ _model: model }, context)
-        }
+        })
       };
 
-      var promise = $http.post('ws/action', params);
+      var promise = $http.post('ws/action', params, config);
       promise.success = function(fn) {
         promise.then(function(response){
           fn(response.data);

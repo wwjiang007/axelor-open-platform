@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -54,6 +54,7 @@ public class PanelEditor extends AbstractPanel {
     @XmlElement(name = "field", type = PanelField.class),
     @XmlElement(name = "button", type = Button.class),
     @XmlElement(name = "spacer", type = Spacer.class),
+    @XmlElement(name = "separator", type = Separator.class),
     @XmlElement(name = "label", type = Label.class),
     @XmlElement(name = "panel", type = Panel.class)
   })

@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -23,7 +23,7 @@ import org.apache.shiro.session.Session;
 
 /** Manages session attributes. */
 class AuthSessionService {
-  private static final String LOGIN_DATE = "loginDate";
+  private static final String LOGIN_DATE = "com.axelor.internal.loginDate";
 
   public void updateLoginDate() {
     updateLoginDate(AuthUtils.getSubject().getSession());

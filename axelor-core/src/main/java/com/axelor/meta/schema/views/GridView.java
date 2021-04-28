@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -70,6 +70,9 @@ public class GridView extends AbstractView implements ExtendableView {
 
   @XmlAttribute(name = "x-no-fetch")
   private Boolean noFetch;
+
+  @XmlAttribute(name = "x-selector")
+  private String selector;
 
   @XmlElement(name = "help")
   private Help inlineHelp;
@@ -228,6 +231,14 @@ public class GridView extends AbstractView implements ExtendableView {
 
   public void setNoFetch(Boolean noFetch) {
     this.noFetch = noFetch;
+  }
+
+  public String getSelector() {
+    return selector;
+  }
+
+  public void setSelector(String selector) {
+    this.selector = selector;
   }
 
   public Help getInlineHelp() {

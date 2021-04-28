@@ -1,3 +1,452 @@
+## 5.4.2 (2021-04-15)
+
+#### Changes
+
+* Default setting `data.export.encoding` to UTF-8
+
+  <details>
+  When UTF-8 is used, BOM is added so that Excel recognizes the encoding.
+  </details>
+
+* Remove jcenter and prevent dependency confusion risk
+* Migrate from opencsv to commons-csv
+* Format exported dates and times with client locale
+
+  <details>
+  Setting `data.export.locale` to set a fixed locale for all exports.
+  Setting `data.export.separator` defaults to ';'.
+  Only numbers (integer, long, decimal) were formatted using client locale.
+  Dates, times, and datetimes now also use client locale.
+  Setting `date.format` is removed.
+  </details>
+
+
+#### Features
+
+* Improve grid customization
+
+  <details>
+  <ul>
+    <li>Show translated field titles besides field names</li>
+    <li>Allow to save column widths</li>
+    <li>Add removed fields as hidden as to preserve expressions</li>
+    <li>Add reset customization button</li>
+    <li>Don’t delete customized grids when clearing cache</li>
+    <li>List fields from search filters in selector</li>
+    <li>Remove move icons in selector</li>
+  </ul>
+  </details>
+
+* Add action to select a `panel` in `panel-tabs`
+
+  <details>
+  Example:
+
+  ```xml
+    <form ...>
+     ...
+     <panel-tabs>
+      <panel title="One" name="t1"></panel>
+      <panel title="Two" name="t2"></panel>
+     </panel-tabs>
+    </form>
+
+    <action-attrs ...>
+      <attribute name="active" for="t1" expr="true" />
+    </action-attrs>
+  ```
+  </details>
+
+* Apply translations on translatable fields and enums for data exports
+
+  <details>
+  Only headers and selections were translated.
+  Translatable fields and enums are now also translated.
+  </details>
+
+* Add "auth.ldap.user.dn.format" and "auth.ldap.user.username.attribute" configurations
+* Add `view-param` named `default-search-filters` to apply filters by default
+
+  <details>
+  Example:
+
+  ```xml
+    <view-param name="search-filters" value="filter-sales"/>
+    <view-param name="default-search-filters" value="confirmed,highValue"/>
+  ```
+
+  Filters named `confirmed` and `highValue` will be applied by default.
+  For that usage, use new attribute `name` for each `filter` in `search-filters`.
+  </details>
+
+* Use thin scrollbars on grids inside form views
+* Add workflow status help
+
+  <details>
+  Example:
+
+  ```java
+  public void onFetch(
+      @Observes @Named(RequestEvent.FETCH) @EntityType(Order.class) PostRequest event) {
+    @SuppressWarnings("unchecked")
+    final Map<String, Object> values = (Map<String, Object>) event.getResponse().getItem(0);
+    if (values != null) {
+      List<Map<String, Object>> status = new ArrayList<>();
+      status.add(
+          ImmutableMap.of(
+              "name", "s1", "title", I18n.get("Status 1"), "color", "red", "help", "Some help…"));
+      values.put("$wkfStatus", status);
+    }
+  }
+  ```
+  </details>
+
+
+#### Fixed
+
+* Fix NPE when loading extension views without corresponding base views
+* Fix "cn" used as ID attribute with LDAP
+* Fix Unexpected character '`' when running npm-build
+* Fix evaluation of filter `if` and `if-module` attributes
+* Fix grid column widths when popup is opened as maximized
+* Fix attrs reset for bpmn use case
+* Fix looped view loading when grid has o2m/m2m fields referencing themselves
+* Fix duplicate onChange call with BooleanRadio widget
+* Merge menus into mobile toolbar
+* Fix fetching LDAP attributes with Active Directory
+* Fix row height when using Image widget in editable grid
+* Fix missing ID in context after 'save' action in multirelational editor
+* Apply view attributes to new records as well
+* Fix "Cannot change session ID" exception when using basic auth on non-secure requests
+* Fix search query causing dirty form
+* Fix Phone widget readonly width adjustment
+* Fix wrong query string append with dynamic URL in HTML view
+
+## 5.4.1 (2021-02-10)
+
+#### Changes
+
+* Add `x-show-bars` attribute to `panel-related` and `panel-dashlet` (disabled by default)
+
+#### Features
+
+* Add relative dates and current user/group criteria to advanced search
+* Add support for defining Column attributes `insertable` and `updatable`
+* Add tel link on grid view when using Phone widget
+* Add support for aggregation with Duration widget
+* Add flag dropdown to Phone widget
+
+#### Fixed
+
+* Fix requiredIf with some widgets (BinaryLink, CodeEditor…)
+* Fix setting null on nullable number field with min/max attributes
+* Preserve per module web resource inclusion order
+* Fix sidebar="false" panel attribute evaluation
+* Fix URL widget in grid view
+* Fix grid field hilite overwritten by grid view hilite
+* Fix parent toolbar/menubar displayed in dashlet
+* Fix search engine action menu selection
+* Group M2O/O2O by ID in grid, but show namecolumn
+* Set "SameSite=None" attribute on cookies to allow CORS requests
+* Set first day of week according to browser locale
+* Fix modern theme button alignment in O2M editor
+
+#### Security
+
+* Fix HTML sanitization
+
+## 5.4.0 (2020-12-18)
+
+#### Changes
+
+* `equalsInclude` attribute marks field to be included in equality test, instead of `hashKey`
+* Improve keyboard shortcuts
+
+  <details>
+  The keyboard shortcuts Ctrl+F and Ctrl+G were conflicting with browser shortcuts,
+  they are now changed to Alt+F and Alt+G respectively. Also fixed some broken shortcuts.
+
+  Also added a dialog to show keyboard shortcuts which can be shown from the top-right corner menu.
+  </details>
+
+* Add support for toolbar and menubar on dashlet and o2m/m2m widgets
+
+  <details>
+  For the toolbar, only first 3 buttons will be visible.
+  For the menubar, only first menu will be visible.
+  </details>
+
+
+#### Deprecated
+
+* Deprecate `LoginRedirectException` in favor of `WebUtils.issueRedirect`
+* Deprecate `hashKey` and `hashAll` in favor of `equalsInclude` and `equalsIncludeAll`
+
+#### Features
+
+* Add support for separators in editors
+* Add menu item in form view to show workflow
+* Add support for x-show-icons on panel-related
+* Add `refresh-tab` response signal
+* Add helper api to easily open html tabs
+* Add support for defining view attrs externally
+* Improve Context api to allow overriding proxy usage
+* Add support searching on translatable fields
+* Override/add filters: currency, percent, number, date
+* Implement grid view customization
+
+  <details>
+  We can now customize the top-level grid view with a customize column menu and
+  selecting/removing/reordering fields.
+
+  The customized view can be shared to all users by admins.
+  </details>
+
+* Add support for more hilite colors
+
+  <details>
+  We can now use more named colors with hilite besides the hilite styles.
+  </details>
+
+* Alert when DMS files and exported files are not found
+* Implement `json_set` function
+
+  <details>
+  The function can be used to update json values using JPQL.
+
+  For example:
+
+  ```sql
+  UPDATE
+    Product p
+  SET
+    p.attrs = json_set(p.attrs, 'seller.name', '"Some NAME"')
+  WHERE
+    json_extract(p.attrs, 'seller', 'id') = 1
+  ```
+  </details>
+
+* Add before transaction complete event
+
+  <details>
+  The event is for internal purpose only. We may promote it as public api in some future version.
+  The event is fired with total number of records updated/deleted in current transaction.
+  </details>
+
+* Numeric and Decimal format support based on browser language
+* Date and DateTime format support based on browser language
+* Add support for `help` attribute to panel widgets
+* Add support for field tooltip templates
+* Support CSS on grid buttons
+* Add `mail.smtp.from` application setting
+* Add support to show workflow status on top of the form
+* Charts decimal/date format support based on browser language
+* Add current view type and view names in action context
+* Add reset search terms icon to advance search box
+* Add support for maximized popups for relational fields
+
+  <details>
+  We can specify `x-popup-maximized="all|editor|selector" to specify whether to show
+  the `editor`, `selector` or both popups in maximized state.
+  </details>
+
+
+#### Fixed
+
+* Fix random mail sender test failure
+* Fix save action in editable grid
+* Fix onChange issue on html widget
+* Fix select image button text in HTML widget
+* Fix `LoginRedirectException`
+* Fix js error when clicking on html view tab
+* Fix Response#setValue with $-prefixed dummy field
+* Fix PDF visibility in DMS when changing tab content with Chrome
+* Fix image-select widget issues
+* Fix updating of selected flags for JavaScript expressions
+* Fix dotted target-name on TagSelect and many-to-one fields
+* Prevent sorting/searching on transient/dummy field in grid
+* Reset attributes when navigating and refreshing records from form view
+* Fix image height in *-to-many editor
+* Prevent searching on relational field without namecolumn in grid
+* Fix OK/Cancel button order on editable grid and master-detail
+* Fix needless recomputing of views
+* Fix visibility evaluation of field using master-detail widget
+* Fix empty selection in grid when action initialized selection state
+* Fix $fmt with dotted fields and custom views
+* Remove unsupported grid button attributes from autocompletion
+* Add missing Indian momentjs locales
+* Fix o2m/m2m field button bar display
+* Fix `target-name` attribute issue on m2o field of grid view
+* Fix save action in master-detail
+* Apply view extensions by matching name and groups
+* Fix NPE when finding computed field dependencies
+* Fix translation of dotted target names
+* Fix touchpad click to confirm on a popup
+* Fix custom field value expression doesn't make form dirty
+* Fix Thai momentjs locale
+* Fix rendering of buttons and action execution on editable grids
+* Fix TypeError when several editable grids have the same dummy fields
+* Add missing English momentjs locales
+* Fix reference names in json fields
+
+  <details>
+  When name field of the reference record is changed, the name value saved in json field
+  is updated to reflect the updated name.
+  </details>
+
+* Fix custom fields support in string templates
+* Fix editable row reset to old value issue
+* Fix context issue with chart click actions
+
+## 5.3.7 (2020-12-18)
+
+#### Features
+
+* Add index to MetaHelp on model, language, view fields
+
+#### Fixed
+
+* Prevent usage of proxies in search request
+* Fix o2m/m2m sorting issue caused by permissions
+* Fix missing CSRF header upon successful login request
+* Fix searching for o2o field on the non-owning side
+* Fix MenuItem tag display with null/empty value
+* Save decimal value with applied x-scale from view
+* Fix translation of dotted fields on references in grid view
+* Fix one-to-many editor validation issue
+* Fix misalignment on grid group row
+* Fix required field validation on contextual custom fields
+
+## 5.3.6 (2020-10-14)
+
+#### Features
+
+* Go into edit on focus for multiline string in editable grid
+* Add index to MailMessage on relatedModel, relatedId fields
+
+#### Fixed
+
+* Fix change tracking translation issue
+* Hide edit in grid icons bar while editing row
+* Set authentication request character encoding to UTF-8
+* Fix customize dashboard with drag & drop
+* Fix Context#asType invalid type error message
+* Fix boolean field focus issue in editable grid
+* Fix timezone issue with start/end time in calendar view popup
+* Fix timezone issue with start/end of calendar view
+* Fix single-select widget on integer field
+* Fix readonly rendering of inline HTML widget
+* Fix readonly rendering of large string in editable grid
+* Fix setting of o2m/m2m field in editable grid from action
+* Fix PostAction event issue for action-record
+* Fix buttons not shown when using x-selector="checkbox"
+* Ignore hiding of fields in editable grid
+* Update dotted fields in grid from form dotted fields
+* Fix onChange not triggered when setting date to null
+* Fix rare emptied row on save issue in editable grid
+* Fix multi-month calendar events missing for intermediate months
+
+## 5.3.5 (2020-08-17)
+
+#### Features
+
+* Add support for help on panel-dashlet
+* Add support for per grid widget checkbox selector
+
+  <details>
+  Now we can use `x-selector="checkbox"` on grid view or panel-related to
+  show checkbox selection.
+  </details>
+
+* Fix gantt view pagination issue
+
+#### Fixed
+
+* Fix switching to another tenant
+* Fix dotted fields disappearing after edition on top-level editable grids
+* Fix black and white tag colors
+* Fix empty form after saving new records in details view
+* Fix downloading of meta files if parent has collections of meta files
+* Fix missing read permission on user/group for DMS
+* Fetch target names for tag-select widget
+* Fix view extension replace on menubar/toolbar/panel-mail
+* Fix action method call with arguments having ':'
+* Fix charts with zero in series
+* Fix emptied field not present in grid after opening popup form
+* Fix truncated title and vertical alignment of tag-select with modern theme
+* Fix view watching from mixed location kinds
+* Fix nullable boolean radio displayed as false
+* Fix search null or empty string field values
+* Fix grid toolbar button js expression issue
+* Fix onNew on editable grid row
+* Fix column menu show/hide item in grid view
+* Fix wrong positional parameter resolution from query binder
+* Fix mail base64 image max line (RFC2045)
+* Fix dotted field translation in grid view
+* Fix NavSelect and MenuBar size adjust issue
+
+#### Security
+
+* Validate external input for tree view
+
+## 5.3.4 (2020-06-29)
+
+#### Fixed
+
+* Fix mass update on grid view because of dotted fields
+* Restrict system page to technical staff
+* Fix the button _signal in context
+* Fix query building with empty logical filters
+* Formatting the restoring meta execution time in ISO time
+* Fix NPE caused by response exception handler
+* Fix missing delimiter in advanced search when no export permission
+* Fix input left padding with ImageSelect widget when element is not shown immediately after edit mode
+* Consider permissions and showArchived view-param for tag-count
+* Fix meta file link with no parent
+
+## 5.3.3 (2020-06-05)
+
+#### Features
+
+* Add support for font config for birt reports
+* Support axis titles on charts
+* Support cards, kanban, and calendar views on dashlets
+* Add support to use m2o fields for kanban columns
+* Allow to show additional details with ref-text widget
+* Add single-select and improve multi-select widget with color support
+* Add support for popup editor on cards and kanban views
+
+  <details>
+  A new attribute `edit-window` is added with the following values:
+
+  * `self` - show editor in same tab
+  * `popup` - show popup editor
+  * `popup-new` - show popup editor for new records only
+  </details>
+
+#### Fixed
+
+* Fix unnecessary requests for name values
+* Fix validation error in editable grid
+* Fix "Invalid or non-matching id" when committing edit in grid
+* Fix meta loading deadlock when creating groups
+* Fix group creation when generating computed views
+* Fix custom view refresh issue in dashlet
+* Fix embedded tomcat runner
+* Preserve column order in data exported from charts
+* Fix text value escape in grid widget
+* Fix details-view with grouped grid not working
+* Fix path resolution in view watcher under Windows
+* Fix CSRF token cookie when using SSO
+* Allow deletion of one-to-one on the non-owning side and change of owner
+* Allow inline edit with grouped grid
+* Fix no file in response when observing exports
+* Fix view watcher on application's resources
+* Don't show fallback characters instead of icons on slow network
+* Fix editable grid issue in details-view
+* Fix setting of owner of one-to-one
+* Fix checkbox alignment in editable grid
+
 ## 5.3.2 (2020-04-16)
 
 #### Features

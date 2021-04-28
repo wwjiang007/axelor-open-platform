@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -60,7 +60,11 @@ public interface AvailableAppSettings {
 
   String DOMAIN_BLACKLIST_PATTERN = "domain.blacklist.pattern";
 
-  String AXELOR_REPORT_DIR = "axelor.report.dir";
+  @Deprecated String AXELOR_REPORT_DIR = "axelor.report.dir";
+
+  String REPORTS_DESIGN_DIR = "reports.design.dir";
+  String REPORTS_FONTS_CONFIG = "reports.fonts.config";
+
   String TEMPLATE_SEARCH_DIR = "template.search.dir";
 
   String FILE_UPLOAD_DIR = "file.upload.dir";
@@ -70,6 +74,8 @@ public interface AvailableAppSettings {
   String DATA_EXPORT_MAX_SIZE = "data.export.max-size";
   String DATA_EXPORT_FETCH_SIZE = "data.export.fetch-size";
   String DATA_EXPORT_ENCODING = "data.export.encoding";
+  String DATA_EXPORT_LOCALE = "data.export.locale";
+  String DATA_EXPORT_SEPARTOR = "data.export.separator";
 
   String CORS_ALLOW_ORIGIN = "cors.allow.origin";
   String CORS_ALLOW_CREDENTIALS = "cors.allow.credentials";
@@ -83,8 +89,6 @@ public interface AvailableAppSettings {
 
   String QUARTZ_ENABLE = "quartz.enable";
   String QUARTZ_THREAD_COUNT = "quartz.threadCount";
-
-  String DATE_FORMAT = "date.format";
 
   String FILE_UPLOAD_FILENAME_PATTERN = "file.upload.filename.pattern";
   String FILE_UPLOAD_WHITELIST_PATTERN = "file.upload.whitelist.pattern";
@@ -123,6 +127,7 @@ public interface AvailableAppSettings {
   String MAIL_SMTP_CHANNEL = "mail.smtp.channel";
   String MAIL_SMTP_TIMEOUT = "mail.smtp.timeout";
   String MAIL_SMTP_CONNECTION_TIMEOUT = "mail.smtp.connectionTimeout";
+  String MAIL_SMTP_FROM = "mail.smtp.from";
 
   String MAIL_IMAP_HOST = "mail.imap.host";
   String MAIL_IMAP_PORT = "mail.imap.port";
@@ -140,7 +145,9 @@ public interface AvailableAppSettings {
   String AUTH_LDAP_SERVER_URL = "auth.ldap.server.url";
   String AUTH_LDAP_USER_BASE = "auth.ldap.user.base";
   String AUTH_LDAP_USER_FILTER = "auth.ldap.user.filter";
+  String AUTH_LDAP_USER_DN_FORMAT = "auth.ldap.user.dn.format";
   String AUTH_LDAP_USER_ID_ATTRIBUTE = "auth.ldap.user.id.attribute";
+  String AUTH_LDAP_USER_USERNAME_ATTRIBUTE = "auth.ldap.user.username.attribute";
   String AUTH_LDAP_GROUP_BASE = "auth.ldap.group.base";
   String AUTH_LDAP_GROUP_FILTER = "auth.ldap.group.filter";
   String AUTH_LDAP_SYSTEM_USER = "auth.ldap.system.user";

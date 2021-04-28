@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -90,7 +90,7 @@ function ManyToOneCtrl($scope, $element, DataSource, ViewService) {
     var related = {};
     var relatives = fields || $scope.findRelativeFields();
     var missing = _.filter(relatives, function (name) {
-      return !value || (ui.canSetNested(value, name) && ui.findNested(value, name) === undefined);
+      return !value || (name === nameField || ui.canSetNested(value, name)) && ui.findNested(value, name) === undefined;
     });
     _.each(relatives, function(name) {
       var prefix = name.split('.')[0];
@@ -104,12 +104,19 @@ function ManyToOneCtrl($scope, $element, DataSource, ViewService) {
           id: value.id,
           $version: value.version || value.$version
         });
-        var trKey = '$t:' + nameField;
-        if (trKey in value) {
-          record[trKey] = value[trKey];
+        var trKey = ui.getNestedTrKey(nameField);
+        var nameValue = ui.findNested(rec, trKey);
+        if (nameValue !== undefined) {
+          ui.setNested(record, trKey, nameValue);
+        } else {
+          nameValue = ui.findNested(value, trKey);
+          if (nameValue !== undefined) {
+            ui.setNested(record, trKey, nameValue);
+          }
         }
-        if (nameField in rec) {
-          record[nameField] = rec[nameField];
+        nameValue = ui.findNested(rec, nameField);
+        if (nameValue !== undefined) {
+          ui.setNested(record, nameField, nameValue);
         }
         _.each(missing, function(name) {
           var value = ui.findNested(rec, name);
@@ -128,7 +135,7 @@ function ManyToOneCtrl($scope, $element, DataSource, ViewService) {
     }
 
     var nameField = $scope.field.targetName || 'id';
-    var trKey = '$t:' + nameField;
+    var trKey = ui.getNestedTrKey(nameField);
     var record = value;
 
     if (value && value.id) {
@@ -141,8 +148,9 @@ function ManyToOneCtrl($scope, $element, DataSource, ViewService) {
         return !value || ui.findNested(value, name) === undefined;
       });
 
-      if (value[trKey] !== undefined) {
-        record[trKey] = value[trKey];
+      var nameValue = ui.findNested(value, trKey);
+      if (nameValue !== undefined) {
+        ui.setNested(record, trKey, nameValue);
       }
 
       if (value[nameField] !== undefined) {
@@ -210,42 +218,6 @@ function ManyToOneCtrl($scope, $element, DataSource, ViewService) {
       });
     }
     $scope.showNestedEditor($scope._isNestedOpen);
-  };
-
-  var icons = null;
-  var actions = {
-    'new': 'canNew',
-    'create': 'canNew',
-    'edit': 'canEdit',
-    'select': 'canSelect',
-    'remove': 'canRemove',
-    'clear': 'canRemove'
-  };
-
-  $scope.canShowIcon = function (which) {
-    var names;
-    var field = $scope.field || {};
-    var prop = actions[which];
-    if (prop !== undefined && $scope.attr(prop) === false) {
-      return false;
-    }
-
-    if (icons === null) {
-      icons = {};
-      names = $scope.field.showIcons || $scope.$parent.field.showIcons;
-      if (names === false || names === 'false') {
-        icons.$all = false;
-      } else if (names === true || names === 'true' || names === undefined) {
-        icons.$all = true;
-      } else if (names) {
-        icons.$all = false;
-        names = names.split(',');
-        names.forEach(function (name) {
-          icons[name.trim()] = true;
-        });
-      }
-    }
-    return icons.$all || !!icons[which];
   };
 }
 
@@ -328,9 +300,10 @@ ui.formInput('ManyToOne', 'Select', {
 
     scope.formatItem = function(item) {
       if (item) {
-        var trKey = "$t:" + scope.field.targetName;
+        var trKey = ui.getNestedTrKey(scope.field.targetName);
         var key = scope.field.targetName || "id";
-        return item[trKey] || item[key] || ui.findNested(item, key);
+        var value = ui.findNested(item, trKey) || ui.findNested(item, key);
+        return axelor.sanitize(value);
       }
       return "";
     };
@@ -604,7 +577,7 @@ ui.formInput('ManyToOne', 'Select', {
 
       var value = scope.getValue();
       var name = scope.field.targetName;
-      if (value && value.id > 0 && !value[name]) {
+      if (name && value && value.id > 0 && !value[name]) {
         return scope._dataSource.details(value.id, name).success(function(rec) {
           value[name] = rec[name];
           input.val(scope.getText());
@@ -819,6 +792,7 @@ ui.formInput('RefSelect', {
 
   link: function(scope, element, attrs, model) {
     this._super.apply(this, arguments);
+    scope.prepareTemplate = true;
 
     var name = scope.field.name,
       selectionList = scope.field.selectionList,
@@ -1013,9 +987,7 @@ ui.formInput('RefText', 'ManyToOne', {
   link_editable: function (scope, element, attrs) {
     this._super.apply(this, arguments);
 
-    if (!scope.field.create) {
-      return;
-    }
+    var field = scope.field;
 
     function freeSelect(text) {
       return function () {
@@ -1028,10 +1000,20 @@ ui.formInput('RefText', 'ManyToOne', {
     scope.loadSelection = function(request, response) {
       this.fetchSelection(request, function(items, page) {
         var term = request.term;
-        if (term) {
+        if (term && field.create) {
           items.push({
             label : _t('Select "{0}"...', term),
             click : freeSelect(term)
+          });
+        }
+        if (field.targetSearch) {
+          items = items.map(function (item) {
+            var label = item.label;
+            var value = item.value;
+            return {
+              label: label + " (" + value[field.targetSearch] + ")",
+              value: value
+            };
           });
         }
         response(items);

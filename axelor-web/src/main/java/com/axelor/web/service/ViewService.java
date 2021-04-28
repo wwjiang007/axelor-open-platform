@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -29,9 +29,11 @@ import com.axelor.meta.ActionExecutor;
 import com.axelor.meta.ActionHandler;
 import com.axelor.meta.MetaStore;
 import com.axelor.meta.db.MetaJsonRecord;
+import com.axelor.meta.loader.XMLViews;
 import com.axelor.meta.schema.actions.Action;
 import com.axelor.meta.schema.views.AbstractView;
 import com.axelor.meta.schema.views.AbstractWidget;
+import com.axelor.meta.schema.views.Button;
 import com.axelor.meta.schema.views.Dashboard;
 import com.axelor.meta.schema.views.Field;
 import com.axelor.meta.schema.views.FormInclude;
@@ -57,6 +59,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.inject.Inject;
 import com.google.inject.servlet.RequestScoped;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -67,6 +70,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -301,6 +305,9 @@ public class ViewService extends AbstractService {
           }
         }
       }
+      if (MetaJsonRecord.class.getName().equals(model)) {
+        names.add("name");
+      }
       data.putAll(MetaStore.findFields(modelClass, names));
     }
 
@@ -336,11 +343,13 @@ public class ViewService extends AbstractService {
     final ObjectMapper om = Beans.get(ObjectMapper.class);
     try {
       final String type = (String) data.get("type");
-      final String json = om.writeValueAsString(data);
       AbstractView view = null;
       switch (type) {
         case "dashboard":
-          view = om.readValue(json, Dashboard.class);
+          view = om.readValue(om.writeValueAsString(data), Dashboard.class);
+          break;
+        case "grid":
+          view = saveGridView(data);
           break;
       }
       if (view != null) {
@@ -349,6 +358,107 @@ public class ViewService extends AbstractService {
     } catch (Exception e) {
     }
     return null;
+  }
+
+  private AbstractView saveGridView(Map<String, Object> json) {
+    final Object viewId = json.get("viewId");
+    final Object customViewId = json.get("customViewId");
+    final String filterViewName = (String) json.get("filterViewName");
+
+    if (viewId == null && customViewId == null) {
+      return null;
+    }
+
+    final ObjectMapper om = Beans.get(ObjectMapper.class);
+    final GridView originalView =
+        viewId != null ? (GridView) XMLViews.findView(Long.parseLong(viewId.toString())) : null;
+    final GridView view =
+        customViewId == null
+            ? originalView
+            : (GridView) XMLViews.findCustomView(Long.parseLong(customViewId.toString()));
+    final SearchFilters filterView =
+        filterViewName != null
+            ? (SearchFilters) XMLViews.findView(filterViewName, "search-filters")
+            : null;
+
+    final List<AbstractWidget> items = new ArrayList<>();
+    final Set<String> names = new HashSet<>();
+
+    for (AbstractWidget item : view.getItems()) {
+      if (item instanceof Field || item instanceof Button) continue;
+      items.add(item);
+    }
+
+    for (Object item : (List<?>) json.get("items")) {
+      @SuppressWarnings("unchecked")
+      final Map<Object, Object> map = (Map<Object, Object>) item;
+      final String type = (String) map.get("type");
+      if ("field".equals(type) || "button".equals(type)) {
+        final Class<?> itemType = "field".equals(type) ? Field.class : Button.class;
+        final String name = (String) map.get("name");
+        if (StringUtils.notBlank(name)) {
+          names.add(name);
+        }
+
+        final Optional<SimpleWidget> existing =
+            view.getItems().stream()
+                .filter(widget -> widget instanceof SimpleWidget)
+                .map(SimpleWidget.class::cast)
+                .filter(widget -> Objects.equals(widget.getName(), name))
+                .findFirst();
+        if (existing.isPresent()) {
+          final SimpleWidget widget = existing.get();
+          widget.setHidden(null);
+          final Object width = map.get("width");
+          if (width != null) {
+            widget.setWidth(String.valueOf(width));
+          }
+          items.add(widget);
+          continue;
+        }
+
+        // Retrieve original title
+        if (map.containsKey("title")) {
+          Stream<AbstractWidget> stream = view.getItems().stream();
+          if (filterView != null) {
+            stream = Stream.concat(stream, filterView.getItems().stream());
+          }
+          stream
+              .filter(widget -> widget instanceof SimpleWidget)
+              .map(SimpleWidget.class::cast)
+              .filter(widget -> Objects.equals(widget.getName(), name))
+              .filter(widget -> StringUtils.notBlank(widget.getTitle()))
+              .findFirst()
+              .ifPresent(widget -> map.put("title", widget.getTitle()));
+        }
+
+        try {
+          items.add((AbstractWidget) om.readValue(om.writeValueAsString(map), itemType));
+        } catch (IOException e) {
+          // this should not happen
+          throw new IllegalArgumentException("Trying to save invalid view schema.");
+        }
+      }
+    }
+
+    // Add missing fields as hidden
+    if (originalView != null) {
+      originalView.getItems().stream()
+          .filter(widget -> widget instanceof SimpleWidget)
+          .map(SimpleWidget.class::cast)
+          .filter(widget -> StringUtils.notBlank(widget.getName()))
+          .filter(widget -> !names.contains(widget.getName()))
+          .forEach(
+              widget -> {
+                widget.setHidden(true);
+                items.add(widget);
+              });
+    }
+
+    view.setCustomViewShared((Boolean) json.get("customViewShared"));
+    view.setItems(items);
+
+    return view;
   }
 
   @GET
@@ -385,6 +495,11 @@ public class ViewService extends AbstractService {
   @POST
   @Path("custom/{name}")
   public Response dataset(@PathParam("name") String name, Request request) {
+    final Map<String, Object> data = request.getData();
+    if (data == null || data.get("_domainAction") == null) {
+      return service.getDataSet(name, request);
+    }
+    ViewService.updateContext((String) data.get("_domainAction"), data);
     return service.getDataSet(name, request);
   }
 

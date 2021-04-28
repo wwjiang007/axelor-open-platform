@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -202,9 +202,9 @@ var EmbeddedEditor = {
       '<div ui-view-form x-handler="this"></div>'+
       '<div class="btn-toolbar pull-right">'+
         '<button type="button" class="btn btn btn-info" ng-click="onClose()" ng-show="isReadonly()"><span x-translate>Back</span></button> '+
-        '<button type="button" class="btn btn-primary" ng-click="onOK()" ng-show="!isReadonly() && canUpdate()"><span x-translate>OK</span></button>'+
-        '<button type="button" class="btn btn-primary" ng-click="onAdd()" ng-show="!isReadonly() && !canUpdate()"><span x-translate>Add</span></button> '+
         '<button type="button" class="btn btn-danger" ng-click="onClose()" ng-show="!isReadonly()"><span x-translate>Cancel</span></button> '+
+        '<button type="button" class="btn btn-primary" ng-click="onAdd()" ng-show="!isReadonly() && !canUpdate()"><span x-translate>Add</span></button> '+
+        '<button type="button" class="btn btn-primary" ng-click="onOK()" ng-show="!isReadonly() && canUpdate()"><span x-translate>OK</span></button>'+
       '</div>'+
     '</fieldset>'
 };

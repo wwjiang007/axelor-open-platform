@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -172,7 +172,7 @@ public final class MetaStore {
       if (property.getTarget() != null) {
         map.put("perms", getPermissions(property.getTarget()));
       }
-      if (property.isMassUpdate()) {
+      if (property.isMassUpdate() && !name.contains(".")) {
         massUpdate = true;
       }
       // find the default value
@@ -594,6 +594,7 @@ public final class MetaStore {
     option.setValue(item.getValue());
     option.setTitle(item.getTitle());
     option.setIcon(item.getIcon());
+    option.setColor(item.getColor());
     option.setOrder(item.getOrder());
     option.setHidden(item.getHidden());
     try {

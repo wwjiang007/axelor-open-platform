@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -53,6 +53,9 @@ public class PanelRelated extends AbstractPanel {
 
   @XmlAttribute(name = "x-row-height")
   private Integer rowHeight;
+
+  @XmlAttribute(name = "x-selector")
+  private String selector;
 
   @XmlAttribute private Boolean editable;
 
@@ -153,6 +156,14 @@ public class PanelRelated extends AbstractPanel {
 
   public void setRowHeight(Integer rowHeight) {
     this.rowHeight = rowHeight;
+  }
+
+  public String getSelector() {
+    return selector;
+  }
+
+  public void setSelector(String selector) {
+    this.selector = selector;
   }
 
   public String getOrderBy() {

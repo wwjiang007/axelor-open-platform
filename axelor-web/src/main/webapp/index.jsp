@@ -2,7 +2,7 @@
 
     Axelor Business Solutions
 
-    Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+    Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
 
     This program is free software: you can redistribute it and/or  modify
     it under the terms of the GNU Affero General Public License, version 3,
@@ -168,13 +168,14 @@ String tenantId = (String) session.getAttribute("tenantId");
                   	<ul class="dropdown-menu">
                   	<% for (String key : tenantMap.keySet()) { %>
                   	<% if (!key.equals(tenantId)) { %>
-                  	  <li><a href="login.jsp?tenant=<%= key %>"><%= tenantMap.get(key) %></a></li>
+                  	  <li><a href="callback?tenant=<%= key %>"><%= tenantMap.get(key) %></a></li>
                   	<% } %>
                   	<% } %>
                   	</ul>
                   </li>
                   <% } %>
                   <li class="divider"></li>
+                  <li><a href="#" ng-click="showShortcuts()"><span x-translate>Shortcuts</span></a></li>
                   <li><a href="#/about"><span x-translate>About</span></a></li>
                   <li><a href="logout"><span x-translate>Log out</span></a></li>
                 </ul>

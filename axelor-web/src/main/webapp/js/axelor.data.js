@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -239,6 +239,29 @@
       },
 
       search: function(options) {
+        function setVersion(value, key, parent) {
+          if (_.isObject(value)) {
+            if (value.version !== undefined) {
+              var newValue = _.extend({}, value, {$version: value.version});
+              delete newValue.version;
+              parent[key] = newValue;
+            }
+            _.each(value, setVersion);
+          }
+        }
+
+        function transform(item) {
+          if (_.isArray(item)) return _.map(item, transform);
+          if (_.isArray(item.criteria)) {
+            item.criteria = transform(item.criteria);
+            return item;
+          }
+          if (item.transformer) {
+            item.transformer(item);
+            delete item.transformer;
+          }
+          return item;
+        }
 
         var opts = _.extend({
           store: true
@@ -269,13 +292,18 @@
 
         offset = offset || 0;
         context = _.extend({}, this._context, context);
+        _.each(context, setVersion);
 
         var query = extend({
           _domain: domain,
           _domainContext: context,
           _domainAction: action || undefined,
           _archived: archived
-        }, filter);
+        }, angular.copy(filter));
+
+        if (query.criteria) {
+          transform(query.criteria);
+        }
 
         var that = this,
           page = this._page,
@@ -293,7 +321,6 @@
 
         promise = promise.then(function(response){
           var res = response.data;
-          var length = (res.data||[]).length;
           res.offset = offset;
           res.data = _.unique(res.data, function (a) { return a.id; });
 
@@ -303,10 +330,6 @@
           } else {
             records = res.data || [];
             page = that._pageInfo(res);
-          }
-
-          if (length !== page.size) {
-            page.total -= (length - page.size);
           }
         });
         promise.success = function(fn){

@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -48,12 +48,27 @@ ui.directive('uiDialog', function() {
         buttons.push({
             text: _t('OK'),
             'class': 'btn btn-primary button-ok',
+            mousedown: function (event) {
+              // XXX: Fix missing click event with touchpad when onChange is pending.
+              event.preventDefault();
+            },
             click: function() {
-              if (onOK) {
-                onOK();
+              // Force blur event on field so that onChange is triggered.
+              dialog.parent().find('.ui-dialog-buttonpane .ui-dialog-buttonset .button-ok').focus();
+
+              var doClick = function () {
+                if (onOK) {
+                  onOK();
+                } else {
+                  element.dialog('close');
+                }
+              };
+
+              if (scope.waitForActions) {
+                scope.waitForActions(doClick);
+              } else {
+                doClick();
               }
-              else
-                element.dialog('close');
             }
           });
       }

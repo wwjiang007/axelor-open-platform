@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -19,23 +19,16 @@ package com.axelor.tools.i18n;
 
 import com.axelor.common.Inflector;
 import com.axelor.common.StringUtils;
-import com.google.common.base.Charsets;
+import com.axelor.common.csv.CSVFile;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.CharStreams;
-import com.opencsv.CSVParser;
-import com.opencsv.CSVReader;
-import com.opencsv.CSVWriter;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -53,6 +46,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.Attributes;
@@ -99,8 +95,6 @@ public class I18nExtractor {
 
   private static final Set<String> TEXT_NODES =
       Sets.newHashSet("option", "message", "static", "help");
-
-  private static final String[] CSV_HEADER = {"key", "message", "comment", "context"};
 
   private static class I18nItem {
 
@@ -461,34 +455,20 @@ public class I18nExtractor {
     }
   }
 
-  private boolean isEmpty(String[] items) {
-    if (items == null || items.length == 0) return true;
-    if (items.length == 1 && (items[0] == null || "".equals(items[0].trim()))) return true;
-    return false;
-  }
-
   private void update(Path file, List<String[]> lines) throws IOException {
     if (!file.toFile().exists()) return;
 
     final Map<String, Map<String, String>> values = new HashMap<>();
-    try (final CSVReader reader =
-        new CSVReader(
-            new InputStreamReader(new FileInputStream(file.toFile()), Charsets.UTF_8),
-            CSVParser.DEFAULT_SEPARATOR,
-            CSVParser.DEFAULT_QUOTE_CHARACTER,
-            '\0')) {
-      String[] headers = reader.readNext();
-      if (headers.length < 2) {
+    final CSVFile csv = CSVFile.DEFAULT.withFirstRecordAsHeader();
+
+    try (CSVParser csvParser = csv.parse(file.toFile())) {
+      if (!csvParser.getHeaderNames().contains("key")) {
         throw new IOException("Invalid language file: " + file);
       }
-      String[] items = null;
-      while ((items = reader.readNext()) != null) {
-        if (items.length != headers.length || isEmpty(items)) continue;
-        Map<String, String> value = new HashMap<>();
-        for (int i = 0; i < headers.length; i++) {
-          value.put(headers[i], items[i]);
+      for (CSVRecord record : csvParser) {
+        if (CSVFile.notEmpty(record)) {
+          values.put(record.get("key"), record.toMap());
         }
-        values.put(value.get("key"), value);
       }
     } catch (IOException e) {
       throw e;
@@ -511,18 +491,16 @@ public class I18nExtractor {
 
   private void save(Path file, List<String[]> values) throws IOException {
     Files.createDirectories(file.getParent());
-    try (CSVWriter csv =
-        new CSVWriter(
-            new OutputStreamWriter(new FileOutputStream(file.toFile()), Charsets.UTF_8))) {
-      csv.writeNext(CSV_HEADER);
+    try (CSVPrinter printer = CSVFile.DEFAULT.withQuoteAll().write(file.toFile())) {
+      printer.printRecord("key", "message", "comment", "context");
       for (String[] line : values) {
         for (int i = 0; i < line.length; i++) {
           if (StringUtils.isBlank(line[i])) {
             line[i] = null;
           }
         }
-        csv.writeNext(line);
       }
+      printer.printRecords(values);
     } catch (IOException e) {
       throw e;
     }

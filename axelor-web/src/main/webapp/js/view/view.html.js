@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -41,6 +41,9 @@ function HtmlViewCtrl($scope, $element, $sce, $interpolate) {
     var view = $scope.view;
     if (view) {
       var url = view.name || view.resource;
+      if (url && url.indexOf('{{') > -1) {
+        url = $interpolate(url)($scope.getContext());
+      }
       if (stamp > 0) {
         var q = url.lastIndexOf('?');
         if (q > -1) {
@@ -48,9 +51,6 @@ function HtmlViewCtrl($scope, $element, $sce, $interpolate) {
         } else {
           url += "?t" + stamp;
         }
-      }
-      if (url && url.indexOf('{{') > -1) {
-        url = $interpolate(url)($scope.getContext());
       }
       return $sce.trustAsResourceUrl(url);
     }
@@ -107,7 +107,7 @@ var directiveFn = function(){
         scope.$on('on:nav-click', function (e, tab) {
           if (tab.$viewScope !== scope) return;
           var iframe = element.find('iframe')[0];
-          var embed = iframe.contentDocument.body.firstChild;
+          var embed = iframe.contentDocument ? iframe.contentDocument.body.firstChild : null;
           if (embed && embed.id === 'plugin') {
             embed.height = '101%';
             setTimeout(function () {

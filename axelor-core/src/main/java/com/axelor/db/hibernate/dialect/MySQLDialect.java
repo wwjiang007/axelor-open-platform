@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -50,9 +50,27 @@ public class MySQLDialect extends MySQL57Dialect {
     }
   }
 
+  static class JsonSetFunction extends AbstractJsonSetFunction {
+
+    public JsonSetFunction() {
+      super("json_set");
+    }
+
+    @Override
+    protected String transformPath(String path) {
+      return "'$." + path + "'";
+    }
+
+    @Override
+    protected Object transformValue(Object value) {
+      return value;
+    }
+  }
+
   public MySQLDialect() {
     super();
     registerColumnType(Types.OTHER, "json");
+    registerFunction("json_set", new JsonSetFunction());
     registerFunction("json_extract", new JsonExtractFunction(StandardBasicTypes.STRING, null));
     registerFunction("json_extract_text", new JsonExtractFunction(StandardBasicTypes.STRING, null));
     registerFunction(

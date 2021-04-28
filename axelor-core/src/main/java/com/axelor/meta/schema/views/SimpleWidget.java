@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -22,6 +22,7 @@ import com.axelor.common.StringUtils;
 import com.axelor.i18n.I18n;
 import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlTransient;
 import javax.xml.bind.annotation.XmlType;
@@ -87,6 +88,7 @@ public abstract class SimpleWidget extends AbstractWidget {
     return title;
   }
 
+  @JsonSetter
   public void setTitle(String title) {
     this.title = title;
   }
@@ -101,6 +103,7 @@ public abstract class SimpleWidget extends AbstractWidget {
     return help;
   }
 
+  @JsonSetter
   public void setHelp(String help) {
     this.help = help;
   }

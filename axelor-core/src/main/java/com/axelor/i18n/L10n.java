@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -17,31 +17,48 @@
  */
 package com.axelor.i18n;
 
-import com.axelor.app.AppSettings;
-import com.axelor.app.AvailableAppSettings;
 import com.axelor.app.internal.AppFilter;
 import java.text.NumberFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.time.chrono.IsoChronology;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.FormatStyle;
 import java.util.Locale;
 
 /** This class provider methods for localization (L10n) services. */
 public final class L10n {
 
-  private static final String DEFAULT_DATE_FORMAT = "yyy-MM-dd";
-  private static final String DEFAULT_TIME_FORMAT = "HH:mm";
-
-  private static final String DATE_FORMAT =
-      AppSettings.get().get(AvailableAppSettings.DATE_FORMAT, DEFAULT_DATE_FORMAT);
-  private static final String TIME_FORMAT = DEFAULT_TIME_FORMAT;
-  private static final String DATE_TIME_FORMAT = DATE_FORMAT + " " + TIME_FORMAT;
-
-  private Locale locale;
+  private final NumberFormat numberFormat;
+  private final DateTimeFormatter dateFormatter;
+  private final DateTimeFormatter timeFormatter;
+  private final DateTimeFormatter dateTimeFormatter;
 
   private L10n(Locale locale) {
-    this.locale = locale;
+    final String datePattern =
+        getPatternWithFullYear(
+            DateTimeFormatterBuilder.getLocalizedDateTimePattern(
+                FormatStyle.SHORT, null, IsoChronology.INSTANCE, locale));
+    final String timePattern =
+        DateTimeFormatterBuilder.getLocalizedDateTimePattern(
+            null, FormatStyle.SHORT, IsoChronology.INSTANCE, locale);
+    final String dateTimePattern =
+        getPatternWithFullYear(
+            DateTimeFormatterBuilder.getLocalizedDateTimePattern(
+                FormatStyle.SHORT, FormatStyle.SHORT, IsoChronology.INSTANCE, locale));
+
+    dateFormatter = DateTimeFormatter.ofPattern(datePattern);
+    timeFormatter = DateTimeFormatter.ofPattern(timePattern);
+    dateTimeFormatter = DateTimeFormatter.ofPattern(dateTimePattern);
+    numberFormat = NumberFormat.getInstance(locale);
+  }
+
+  /** Get pattern with 4-digit year. */
+  private String getPatternWithFullYear(String pattern) {
+    return pattern.replaceAll("\\by+\\b", "yyyy").replaceAll("\\bu+\\b", "uuuu");
   }
 
   /**
@@ -71,11 +88,7 @@ public final class L10n {
    * @return value as formated string
    */
   public String format(Number value) {
-    if (value == null) {
-      return null;
-    }
-    final NumberFormat fmt = NumberFormat.getInstance(locale);
-    return fmt.format(value);
+    return format(value, true);
   }
 
   /**
@@ -89,9 +102,8 @@ public final class L10n {
     if (value == null) {
       return null;
     }
-    final NumberFormat fmt = NumberFormat.getInstance(locale);
-    fmt.setGroupingUsed(grouping);
-    return fmt.format(value);
+    numberFormat.setGroupingUsed(grouping);
+    return numberFormat.format(value);
   }
 
   /**
@@ -104,7 +116,20 @@ public final class L10n {
     if (value == null) {
       return null;
     }
-    return DateTimeFormatter.ofPattern(DATE_FORMAT).format(value);
+    return dateFormatter.format(value);
+  }
+
+  /**
+   * Format the time value.
+   *
+   * @param value the value to format
+   * @return value as formated string
+   */
+  public String format(LocalTime value) {
+    if (value == null) {
+      return null;
+    }
+    return timeFormatter.format(value);
   }
 
   /**
@@ -117,7 +142,7 @@ public final class L10n {
     if (value == null) {
       return null;
     }
-    return DateTimeFormatter.ofPattern(DATE_TIME_FORMAT).format(value);
+    return dateTimeFormatter.format(value);
   }
 
   /**
@@ -130,6 +155,6 @@ public final class L10n {
     if (value == null) {
       return null;
     }
-    return DateTimeFormatter.ofPattern(DATE_TIME_FORMAT).format(value);
+    return dateTimeFormatter.format(value);
   }
 }

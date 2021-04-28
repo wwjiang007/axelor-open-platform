@@ -1,7 +1,7 @@
 /*
  * Axelor Business Solutions
  *
- * Copyright (C) 2005-2020 Axelor (<http://axelor.com>).
+ * Copyright (C) 2005-2021 Axelor (<http://axelor.com>).
  *
  * This program is free software: you can redistribute it and/or  modify
  * it under the terms of the GNU Affero General Public License, version 3,
@@ -176,7 +176,7 @@ function handleError(scope, item, message) {
   var e = $('<span class="error"></span>').text(message);
   var p = item.parent('.form-item');
 
-  if (item.children(':first').is(':input,.input-append,.picker-input')) {
+  if (item.children(':first').is(':input,.input-append,.picker-input,.input')) {
     p.append(e);
   } else {
     p.prepend(e);
@@ -269,6 +269,16 @@ ActionHandler.prototype = {
 
   onClick: function(event) {
     var self = this;
+    var withMoreAttrs = function (promise) {
+      var actions = self.action.trim().split(/\s*,\s*/);
+      if (actions.indexOf('save') > -1) {
+        return promise.then(function() {
+          return self._handleAction('com.axelor.meta.web.MetaController:moreAttrs');
+        });
+      }
+      return promise;
+    };
+
     var prompt = this._getPrompt();
     if (prompt) {
       var deferred = this.ws.defer(),
@@ -276,7 +286,7 @@ ActionHandler.prototype = {
       axelor.dialogs.confirm(prompt, function(confirmed){
         if (confirmed) {
           self._fireBeforeSave().then(function() {
-            self.handle().then(deferred.resolve, deferred.reject);
+            withMoreAttrs(self.handle()).then(deferred.resolve, deferred.reject);
           });
         } else {
           self.scope.$timeout(deferred.reject);
@@ -287,7 +297,7 @@ ActionHandler.prototype = {
       return promise;
     }
     return this._fireBeforeSave().then(function() {
-      return self.handle();
+      return withMoreAttrs(self.handle());
     });
   },
 
@@ -305,18 +315,36 @@ ActionHandler.prototype = {
   },
 
   _getContext: function() {
-    var scope = this.scope,
-      context = scope.getContext ? scope.getContext() : scope.record,
-      viewParams = scope._viewParams || {};
+    var scope = this.scope;
+    var context = scope.getContext ? scope.getContext() : scope.record;
+    var viewParams = scope._viewParams || {};
+
+    if (scope._isEditorScope && scope.handler) {
+      viewParams = scope.handler._viewParams || viewParams;
+    }
 
     context = _.extend({}, viewParams.context, context);
     if (context._model === undefined) {
       context._model = scope._model;
     }
 
+    if (viewParams.viewType) context._viewType = viewParams.viewType;
+    if (viewParams.views && viewParams.views.length) {
+      context._views = _.map(viewParams.views, function (view) {
+        if (view.type === context._viewType) context._viewName = view.name;
+        return { type: view.type, name: view.name };
+      });
+    }
+
     // include button name as _signal (used by workflow engine)
-    if (this.element.is("button,a.button-item,li.action-item")) {
+    if (this.element.is("button,.button-item,li.action-item")) {
       context._signal = this.element.attr('name') || this.element.attr('x-name');
+    }
+
+    // include field name as source
+    var source = this.element.attr('x-field') || this.element.attr('name') || this.element.attr('x-name');
+    if (source) {
+      context._source = source;
     }
 
     return context;
@@ -708,16 +736,8 @@ ActionHandler.prototype = {
     }
 
     if (data.exportFile) {
-      (function () {
-        var link = "ws/files/data-export/" + data.exportFile;
-        var frame = $('<iframe>').appendTo('body').hide();
-        frame.attr("src", link);
-        setTimeout(function(){
-          frame.attr("src", "");
-          frame.remove();
-          frame = null;
-        }, 5000);
-      })();
+      var link = "ws/files/data-export/" + data.exportFile;
+      ui.download(link, data.exportFile);
     }
 
     if (data.signal === 'refresh-app') {
@@ -823,13 +843,18 @@ ActionHandler.prototype = {
     }
 
     if (data.validate || data.save) {
-      scope.$timeout(function () {
-        self._handleSave(!!data.validate).then(function(){
-          scope.ajaxStop(function () {
-            deferred.resolve(data.pending);
-          }, 100);
-        }, deferred.reject);
+      scope.$emit('on:before-save-action', rootScope.record);
+
+      rootScope.afterGridEdit(function () {
+        scope.$timeout(function () {
+          self._handleSave(!!data.validate).then(function () {
+            scope.ajaxStop(function () {
+              deferred.resolve(data.pending);
+            }, 100);
+          }, deferred.reject);
+        });
       });
+
       return deferred.promise;
     }
 
@@ -1014,6 +1039,20 @@ ActionHandler.prototype = {
             itemScope.removeItems(value);
           }
           break;
+        case 'active':
+          if (itemScope.selectTab) {
+            var tabName = (itemScope.field || {}).name;
+            var selectedTab = _.find(itemScope.tabs, _.toBoolean(value)
+              ? function (tab) {
+              return tabName === (tab.field || {}).name;
+            } : function (tab) {
+              return tabName !== (tab.field || {}).name;
+            });
+            if (selectedTab) {
+              itemScope.selectTab(selectedTab);
+            }
+          }
+          break;
         }
       });
 
@@ -1033,6 +1072,10 @@ ActionHandler.prototype = {
             parentElem.scope().$$pendingAttrs = parentElem.scope().$$pendingAttrs || {};
             parentElem.scope().$$pendingAttrs[itemName.substring(itemName.indexOf('.')+1)] = itemAttrs;
           }
+        }
+        // self (form itself)
+        if (itemName === 'self') {
+          setAttrs(formElement, _.pick(itemAttrs, 'readonly'));
         }
         return;
       }
